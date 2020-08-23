@@ -23,7 +23,6 @@ class Trainer:
                     # print('Tensor with grad found:', tensor)
                     # print(' - gradient:', tensor.grad)
                     # print()
-                    print(tensor.requires_grad, tensor.size(), tensor.grad)
                 except AttributeError as e:
                     self.getBack(n[0])
 
@@ -77,11 +76,6 @@ class Trainer:
         self.optimizer.step()
         #print(loss_value.grad_fn)
 
-        if self.type == 'board':
-            self.getBack(loss.grad_fn)
-            #print(self.step_model.gc2.weight)
-            # x,y = self.step_model(torch.FloatTensor(self.prep_input(gameEnv.init_alloc)), adj)
-            # print(x,y)
         print("--------------------------------------------------------")
 
         return loss

@@ -24,7 +24,7 @@ if __name__ == '__main__':
         if (i+1)%10==0:
             pass
 
-        sts_board, searches_pi_board, ret_board, sts_node, searches_pi_node, ret_node = execute_episode(trainer_board, trainer_node, 32, env)
+        sts_board, searches_pi_board, ret_board, sts_node, searches_pi_node, ret_node = execute_episode(trainer_board, trainer_node, 64, env)
 
         mem_board.add_all({"sts" : sts_board, "pi" : searches_pi_board, "return" : ret_board})
         for i in range(env.adj.shape[0]):
@@ -41,3 +41,6 @@ if __name__ == '__main__':
                 batch_node = mem_node[i].get_minibatch()
                 loss = trainer_node[i].train(batch_node["sts"], batch_node["pi"], batch_node["return"])
                 #print("moribo", i, loss.item())
+    sts_board, searches_pi_board, ret_board, sts_node, searches_pi_node, ret_node = execute_episode(trainer_board, trainer_node, 32, env)
+    for sts in sts_board:
+        print(sts, np.sum(sts*env.P_val))
