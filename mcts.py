@@ -40,8 +40,11 @@ class MCTSNode:
     """
 
     map = {}
+    moron = {}
     ajaira = 0.0
     shob = 0.0
+    shob2 = 0.0
+    shob3 = 0.0
 
     def __init__(self, state, n_actions, TreeEnv, type, action=None, parent=None):
         """
@@ -135,13 +138,13 @@ class MCTSNode:
             current.N += 1
             # Encountered leaf node (i.e. node that is not yet expanded).
             if not current.is_expanded:
+                MCTSNode.shob3 += 1.0
+                #print("mau")
                 break
             if current.is_done():
-                #print(current.state, current.type, current.bad, current.depth)
                 break
             # Choose action with highest score.
             best_move = np.argmax(current.bad*current.child_action_score)
-            #print(current.bad, current.child_action_score, best_move)
             current = current.maybe_add_child(best_move)
         return current
 
@@ -154,12 +157,13 @@ class MCTSNode:
         :return: Child MCTSNode.
         """
         action = node.idx_action[action]
-        #print(node.state, node.type, action, node.child_N, node.child_prior, node.child_action_score, len(MCTSNode.map))
+
         if action not in node.children:
-            # Obtain state following given action.
-            #print(self.type, self.state, self.n_actions, action, self)
+
             new_state = node.TreeEnv.next_state(node.state, action, node.type)
-            #print(self.type, self.state, self.n_actions, action, self)
+            #print("hau")
+            #MCTSNode.shob2 += 1.0
+
             if node.type == 'board':
                 if (str(new_state), action) in MCTSNode.map:
                     node.children[action] = MCTSNode.map[(str(new_state), action)]
@@ -167,9 +171,7 @@ class MCTSNode:
                     node.children[action] = MCTSNode(new_state, node.TreeEnv.actions[action],
                                                     node.TreeEnv, type = 'node',
                                                     action=node.action_idx[action], parent=node)
-                    MCTSNode.shob -= 1.0
                     MCTSNode.map[(str(new_state), action)] = node.children[action]
-                    print(len(MCTSNode.map))
             else:
                 if (str(new_state), -1) in MCTSNode.map:
                     node.children[action] = MCTSNode.map[(str(new_state), -1)]
@@ -260,7 +262,6 @@ class MCTSNode:
                     self.bad[idx] = 0.0
         if np.sum(self.bad) == 0.0:
             MCTSNode.ajaira += 1.0
-        MCTSNode.shob += 1.0
         # This is a deviation from the paper that led to better results in
         # practice (following the MiniGo implementation).
         #self.child_W = np.ones([len(self.n_actions)], dtype=np.float32) * value
@@ -321,7 +322,7 @@ class MCTS:
     """
 
     def __init__(self, board_netw, node_netw, TreeEnv, seconds_per_move=None,
-                 simulations_per_move=800, num_parallel=200):
+                 simulations_per_move=800, num_parallel=1):
         """
         :param agent_netw: Network for predicting action probabilities and
         state value estimate.
@@ -348,8 +349,11 @@ class MCTS:
 
         self.root = None
         MCTSNode.map.clear()
+        MCTSNode.moron.clear()
         MCTSNode.ajaira = 0.0
         MCTSNode.shob = 0.0
+        MCTSNode.shob2 = 0.0
+        MCTSNode.shob3 = 0.0
 
     def initialize_search(self, state=None):
         init_state = self.TreeEnv.initial_state()
@@ -408,6 +412,7 @@ class MCTS:
             # If we encounter done-state, we do not need the agent network to
             # bootstrap. We can backup the value right away.
             if leaf.is_done():
+                MCTSNode.shob2 += 1.0
                 value = self.TreeEnv.get_return(leaf.state)
                 leaf.backup_value(value, up_to=self.root)
                 continue
@@ -416,6 +421,9 @@ class MCTS:
             # network.
             leaf.add_virtual_loss(up_to=self.root)
             leaves.append(leaf)
+            MCTSNode.shob += 1.0
+            #print((str(leaf.state), leaf.type))
+            MCTSNode.moron[(str(leaf.state), leaf.type)] = 1
             #print(self.root.depth, leaf.depth)
         # Evaluate the leaf-states all at once and backup the value estimates.
         if leaves:
@@ -528,7 +536,7 @@ def execute_episode(board_netw, node_netw, num_simulations, TreeEnv):
         mcts.take_action(action)
 
         if mcts.root.is_done():
-            print("chong ", sum(mcts.root.bad), mcts.root.depth, len(MCTSNode.map), MCTSNode.ajaira, MCTSNode.shob)
+            print("chong ", sum(mcts.root.bad), mcts.root.depth, len(MCTSNode.map), len(MCTSNode.moron), MCTSNode.ajaira, MCTSNode.shob, MCTSNode.shob2, MCTSNode.shob3)
             break
 
     # Computes the returns at each step from the list of rewards obtained at
