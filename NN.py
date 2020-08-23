@@ -99,7 +99,7 @@ class GCNBoard(nn.Module):
         finy = self.c2(y).view(-1)
 
 
-        return F.softmax(finx, dim=1), finy
+        return F.softmax(finx, dim=0), finy
 
     def step(self, x, adj):
         x = torch.FloatTensor(x)
@@ -137,7 +137,7 @@ class GCNNode(nn.Module):
         finx = self.c1(x2)
         finy = self.c2(y).view(-1)
 
-        return F.softmax(finx, dim=1), finy
+        return F.softmax(finx, dim=0), finy
 
     def step(self, x, adj):
 
