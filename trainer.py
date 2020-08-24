@@ -5,7 +5,7 @@ from ResAlloc_env import gameEnv
 
 class Trainer:
 
-    def __init__(self, Policy, env, type, learning_rate=0.1):
+    def __init__(self, Policy, env, type, learning_rate=0.03):
 
         self.step_model = Policy()
         self.env = env
@@ -76,6 +76,6 @@ class Trainer:
         self.optimizer.step()
         #print(loss_value.grad_fn)
 
-        print("--------------------------------------------------------")
+        #print("-------------------------------------------------------- ", loss_policy, loss_value)
 
         return loss

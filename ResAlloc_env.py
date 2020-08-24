@@ -61,7 +61,7 @@ class gameEnv(staticEnv):
 
     @staticmethod
     def is_done_state(step_idx):
-        return step_idx >= 10
+        return step_idx >= 30
         '''
         depth of the MCTS tree
         '''

@@ -86,7 +86,7 @@ class GCNBoard(nn.Module):
         experiment with dropout
         '''
         x = F.relu(self.gc1(x, adj))
-        #x = F.dropout(x, self.dropout, training=self.training)
+        x = F.dropout(x, self.dropout, training=self.training)
         #print(self.c1.weight)
         x2 = self.gc2(x, adj)
         y = self.gc3(x, adj)
@@ -127,7 +127,7 @@ class GCNNode(nn.Module):
         '''
 
         x = F.relu(self.gc1(x, adj))
-        #x = F.dropout(x, self.dropout, training=self.training)
+        x = F.dropout(x, self.dropout, training=self.training)
         x2 = self.gc2(x, adj)
         y = self.gc3(x, adj)
 
