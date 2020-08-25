@@ -5,14 +5,15 @@ from ResAlloc_env import gameEnv
 
 class Trainer:
 
-    def __init__(self, Policy, env, type, learning_rate=0.03):
+    def __init__(self, Policy, env, type, learning_rate=0.1):
 
         self.step_model = Policy()
         self.env = env
         self.type = type
+        self.learning_rate = learning_rate
 
         self.value_criterion = nn.MSELoss()
-        self.optimizer = torch.optim.SGD(self.step_model.parameters(),lr=learning_rate)
+        self.optimizer = torch.optim.Adam(self.step_model.parameters(),lr=self.learning_rate)
 
     def getBack(self, var_grad_fn):
         for n in var_grad_fn.next_functions:
@@ -76,6 +77,6 @@ class Trainer:
         self.optimizer.step()
         #print(loss_value.grad_fn)
 
-        #print("-------------------------------------------------------- ", loss_policy, loss_value)
+        print("-------------------------------------------------------- ", loss_policy, loss_value)
 
         return loss

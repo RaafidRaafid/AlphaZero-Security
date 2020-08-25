@@ -115,6 +115,7 @@ class MCTSNode:
         Action_Score(s, a) = Q(s, a) + U(s, a) as in paper. A high value
         means the node should be traversed.
         """
+        #print(self.child_Q, self.child_U)
         return self.bad*(self.child_Q + self.child_U)
 
     def select_leaf(self):
@@ -393,23 +394,30 @@ class MCTS:
             leaf = self.root.select_leaf()
             # If we encounter done-state, we do not need the agent network to
             # bootstrap. We can backup the value right away.
+
+            # if leaf.depth - self.root.depth >= 20:
+            #     value = self.TreeEnv.get_return(leaf.state)
+            #     leaf.backup_value(value, up_to=self.root)
+            #     continue
+
             if leaf.is_done():
                 value = self.TreeEnv.get_return(leaf.state)
                 leaf.backup_value(value, up_to=self.root)
                 continue
+            if leaf.type == 'board':
+                # input prep
+                x, y = self.board_netw.step_model.step(self.prep_input(leaf.state), self.TreeEnv.adj)
+                x = x.data.numpy()
+                y = y.data.numpy()
+            else:
+                idx = leaf.parent.idx_action[leaf.action]
+                x, y = self.node_netw[idx].step_model.step(self.prep_input(leaf.state), self.TreeEnv.adj)
+                x = x.data.numpy()
+                y = y.data.numpy()
 
-        if leaf.type == 'board':
-            # input prep
-            x, y = self.board_netw.step_model.step(self.prep_input(leaf.state), self.TreeEnv.adj)
-            x = x.data.numpy()
-            y = y.data.numpy()
-        else:
-            idx = leaf.parent.idx_action[leaf.action]
-            x, y = self.node_netw[idx].step_model.step(self.prep_input(leaf.state), self.TreeEnv.adj)
-            x = x.data.numpy()
-            y = y.data.numpy()
-
-        leaf.incorporate_estimates(x, y, up_to=self.root)
+            #print("----------> ", y)
+            leaf.incorporate_estimates(x, y, up_to=self.root)
+            break
 
     def pick_action(self):
         """
@@ -465,6 +473,7 @@ class MCTS:
         new_root = self.root.maybe_add_child(action)
         #print(self.root.depth, new_root.depth)
         self.root = new_root
+        #print("////////////////////////////////////////////////////////////// ", self.root.depth)
         #print("bokhri", len(MCTSNode.map))
         #del self.root.parent.children
 
