@@ -9,7 +9,7 @@ class ReplayMemory:
     reached.
     """
 
-    def __init__(self, size, column_shapes, batch_size=8):
+    def __init__(self, size, column_shapes, batch_size=16):
         """
         :param size: Number of experience tuples to be stored in the replay
         memory.

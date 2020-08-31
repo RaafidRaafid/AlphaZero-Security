@@ -6,8 +6,9 @@ import numpy as np
 
 # Exploration constant
 c_PUCT = 1.38
+#c_PUCT = 1.72
 # Dirichlet noise alpha parameter.
-D_NOISE_ALPHA = 0.06
+D_NOISE_ALPHA = 1.0
 # Number of steps into the episode after which we always select the
 # action with highest action probability rather than selecting randomly
 TEMP_THRESHOLD = 5
@@ -252,6 +253,7 @@ class MCTSNode:
         # This is a deviation from the paper that led to better results in
         # practice (following the MiniGo implementation).
         #self.child_W = np.ones([len(self.n_actions)], dtype=np.float32) * value
+
         self.backup_value(value, up_to=up_to)
 
     def backup_value(self, value, up_to):
@@ -263,7 +265,8 @@ class MCTSNode:
         self.W += value
         if self.parent is None or self is up_to:
             return
-        self.parent.backup_value(value, up_to)
+        # self.parent.backup_value(value, up_to)
+        self.parent.backup_value(value*0.9, up_to)
 
     def is_done(self):
         if self.is_expanded and sum(self.bad) == 0.0:
@@ -436,6 +439,10 @@ class MCTS:
         #     selection = rd.random()
         #     action_idx = cdf.searchsorted(selection)
         #     assert self.root.child_N[action_idx] != 0
+
+        # print(self.root.state, self.root.type, self.root.n_actions)
+        # print("kahini ki ", self.root.original_prior, self.root.child_prior)
+        # print("pailam ki ", self.root.child_N)
 
         action_idx = np.argmax(self.root.bad*self.root.child_N)
         #print(self.root.bad, self.root.child_N, action_idx)

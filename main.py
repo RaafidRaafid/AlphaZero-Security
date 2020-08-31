@@ -22,7 +22,7 @@ if __name__ == '__main__':
 
     lr = 1.0
 
-    for i in range(30):
+    for i in range(20):
         if (i+1)%5==0:
             lr = lr + 1.0
 
@@ -36,7 +36,7 @@ if __name__ == '__main__':
             mem_node[i].add_all({"sts" : sts_node[i], "pi" : searches_pi_node[i], "return" : ret_node[i]})
 
         if mem_board.count >= 8:
-            trainer_board.learning_rate = 0.06/float(lr)
+            trainer_board.learning_rate = 0.03/float(lr)
             print("bt",mem_board.count)
             batch_board = mem_board.get_minibatch()
             #print(batch_board["sts"], batch_board["pi"], batch_board["return"])
@@ -45,10 +45,7 @@ if __name__ == '__main__':
 
         for i in range(env.adj.shape[0]):
             print("nd",i, mem_node[i].count)
-            if mem_node[i].count >= 8:
+            if mem_node[i].count >= 2:
                 trainer_node[i].learning_rate = 0.06/float(lr)
                 batch_node = mem_node[i].get_minibatch()
                 loss = trainer_node[i].train(batch_node["sts"], batch_node["pi"], batch_node["return"])
-    # sts_board, searches_pi_board, ret_board, sts_node, searches_pi_node, ret_node = execute_episode(trainer_board, trainer_node, 512, env)
-    # for sts in sts_board:
-    #     print(sts, np.sum(sts*env.P_val))
