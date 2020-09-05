@@ -5,13 +5,15 @@ import collections
 import numpy as np
 
 # Exploration constant
-c_PUCT = 1.38
-#c_PUCT = 1.72
+# c_PUCT = 1.38
+# c_PUCT = 1.72
+c_PUCT = 2.76
 # Dirichlet noise alpha parameter.
-D_NOISE_ALPHA = 1.0
+D_NOISE_ALPHA = 0.1
 # Number of steps into the episode after which we always select the
 # action with highest action probability rather than selecting randomly
-TEMP_THRESHOLD = 5
+TEMP_THRESHOLD = 4
+STOP_CUTTER = 0.0
 
 
 class DummyNode:
@@ -66,6 +68,7 @@ class MCTSNode:
         self.state = state
         self.n_actions = n_actions
         self.is_expanded = False
+        self.is_stopper = False
         self.n_vlosses = 0  # Number of virtual losses on this node
         self.child_N = np.zeros([len(n_actions)], dtype=np.float32)
         self.child_W = np.zeros([len(n_actions)], dtype=np.float32)
@@ -136,7 +139,7 @@ class MCTSNode:
             # Encountered leaf node (i.e. node that is not yet expanded).
             if not current.is_expanded:
                 break
-            if current.is_done():
+            if current.is_done() or current.is_stopper:
                 break
             # Choose action with highest score.
             best_move = np.argmax(current.bad*current.child_action_score)
@@ -158,13 +161,16 @@ class MCTSNode:
             new_state = node.TreeEnv.next_state(node.state, action, node.type)
 
             if node.type == 'board':
-                node.children[action] = MCTSNode(new_state, node.TreeEnv.actions[action],
-                                                node.TreeEnv, type = 'node',
-                                                action=node.action_idx[action], parent=node)
+                if action == -1:
+                    node.children[action] = MCTSNode(new_state, [], node.TreeEnv, type = 'board', action = node.action_idx[action], parent=node)
+                    node.children[action].is_stopper = True
+                else:
+                    node.children[action] = MCTSNode(new_state, node.TreeEnv.actions[action], node.TreeEnv, type = 'node', action=node.action_idx[action], parent=node)
             else:
                 temp = [0.0]*len(new_state)
                 temp[:] = new_state[:]
                 ttemp = []
+                ttemp.append(-1)
                 for i in range(len(temp)):
                     if temp[i] > 0:
                         ttemp.append(i)
@@ -254,6 +260,7 @@ class MCTSNode:
         # practice (following the MiniGo implementation).
         #self.child_W = np.ones([len(self.n_actions)], dtype=np.float32) * value
 
+
         self.backup_value(value, up_to=up_to)
 
     def backup_value(self, value, up_to):
@@ -265,8 +272,8 @@ class MCTSNode:
         self.W += value
         if self.parent is None or self is up_to:
             return
-        # self.parent.backup_value(value, up_to)
-        self.parent.backup_value(value*0.9, up_to)
+        self.parent.backup_value(value, up_to)
+        # self.parent.backup_value(value*0.95, up_to)
 
     def is_done(self):
         if self.is_expanded and sum(self.bad) == 0.0:
@@ -274,9 +281,12 @@ class MCTSNode:
         return self.TreeEnv.is_done_state(self.depth)
 
     def inject_noise(self):
-        #print(self.child_prior)
         dirch = np.random.dirichlet([D_NOISE_ALPHA] * len(self.n_actions))
         self.child_prior = self.child_prior * 0.75 + dirch * 0.25
+        if self.type == 'board':
+            for i in range(3):
+                self.child_prior[i+1] += (self.child_prior[0]*(1-STOP_CUTTER))/3
+            self.child_prior[0] = self.child_prior[0]*STOP_CUTTER
 
     def visits_as_probs(self, squash=False):
         """
@@ -344,6 +354,7 @@ class MCTS:
     def initialize_search(self, state=None):
         init_state = self.TreeEnv.initial_state()
         n_actions = []
+        n_actions.append(-1)
         for i in range(len(init_state)):
             if init_state[i] == 1:
                 n_actions.append(i)
@@ -399,12 +410,12 @@ class MCTS:
             # bootstrap. We can backup the value right away.
 
             # if leaf.depth - self.root.depth >= 20:
-            #     value = self.TreeEnv.get_return(leaf.state)
+            #     value = self.TreeEnv.get_return_real(leaf.state)
             #     leaf.backup_value(value, up_to=self.root)
             #     continue
 
-            if leaf.is_done():
-                value = self.TreeEnv.get_return(leaf.state)
+            if leaf.is_done() or leaf.is_stopper:
+                value = self.TreeEnv.get_return_real(leaf.state)
                 leaf.backup_value(value, up_to=self.root)
                 continue
             if leaf.type == 'board':
@@ -430,23 +441,22 @@ class MCTS:
             if self.root.n_actions[i] in self.root.children:
                 self.root.child_N[i] = self.root.children[self.root.n_actions[i]].N
 
+        print(self.root.state, self.root.type, self.root.n_actions)
+        print("kahini ki ", self.root.original_prior, self.root.child_prior)
+        print("pailam ki ", self.root.child_W, self.root.child_N+1, self.root.child_W/(self.root.child_N+1))
 
-        # if self.root.depth > self.temp_threshold:
-        #
-        # else:
-        #     cdf = (self.root.bad*self.root.child_N).cumsum()
-        #     cdf /= cdf[-1]
-        #     selection = rd.random()
-        #     action_idx = cdf.searchsorted(selection)
-        #     assert self.root.child_N[action_idx] != 0
+        if self.root.depth > self.temp_threshold:
+            action_idx = np.argmax(self.root.bad*self.root.child_N)
+            #print(self.root.bad, self.root.child_N, action_idx)
+            return action_idx
+        else:
+            cdf = (self.root.bad*self.root.child_N).cumsum()
+            cdf /= cdf[-1]
+            selection = rd.random()
+            action_idx = cdf.searchsorted(selection)
+            assert self.root.child_N[action_idx] != 0
+            return action_idx
 
-        # print(self.root.state, self.root.type, self.root.n_actions)
-        # print("kahini ki ", self.root.original_prior, self.root.child_prior)
-        # print("pailam ki ", self.root.child_N)
-
-        action_idx = np.argmax(self.root.bad*self.root.child_N)
-        #print(self.root.bad, self.root.child_N, action_idx)
-        return action_idx
 
     def hash(self, alloc):
         sum = 0.0
@@ -475,6 +485,11 @@ class MCTS:
             #print(self.hash(self.root.state), self.root.type, idx, self.root.n_actions, self.root.child_N)
 
 
+        # if self.root.type == 'board':
+        #     print(action, self.root.idx_action[action])
+        # if self.root.type == 'board' and self.root.idx_action[action] == -1:
+        #     self.root.is_stopper = True
+        #     return self
 
         # Resulting state becomes new root of the tree.
         new_root = self.root.maybe_add_child(action)
@@ -485,7 +500,10 @@ class MCTS:
         #del self.root.parent.children
 
 
-def execute_episode(board_netw, node_netw, num_simulations, TreeEnv):
+def execute_episode(board_netw, node_netw, num_simulations, TreeEnv, stop_cutter):
+
+    global STOP_CUTTER
+    STOP_CUTTER = stop_cutter
 
     mcts = MCTS(board_netw, node_netw, TreeEnv)
 
@@ -500,6 +518,11 @@ def execute_episode(board_netw, node_netw, num_simulations, TreeEnv):
     first_node.incorporate_estimates(probs, vals, first_node)
 
     while True:
+
+        if mcts.root.type == 'board':
+            x, y = mcts.board_netw.step_model.step(mcts.prep_input(mcts.root.state), mcts.TreeEnv.adj)
+            print("============boom========== ", mcts.root.state, y)
+
         mcts.root.inject_noise()
         current_simulations = mcts.root.N
 
@@ -514,7 +537,7 @@ def execute_episode(board_netw, node_netw, num_simulations, TreeEnv):
         action = mcts.pick_action()
         mcts.take_action(action)
 
-        if mcts.root.is_done():
+        if mcts.root.is_done() or mcts.root.is_stopper:
             print("chong ", sum(mcts.root.bad), mcts.root.depth, len(MCTSNode.map), MCTSNode.count)
             break
 
@@ -522,10 +545,22 @@ def execute_episode(board_netw, node_netw, num_simulations, TreeEnv):
     # each step. The return is the sum of rewards obtained *after* the step.
 
     #state, search_pi, q, reward
-    rew = TreeEnv.get_return(mcts.root.state)
-    ret_board = [rew]*len(mcts.sts_board)
+    rew = TreeEnv.get_return_real(mcts.root.state)
+    # ret_board = [rew]*len(mcts.sts_board)
+
+    ret_board = []
+    for sts in mcts.sts_board:
+        ret_board.append(TreeEnv.get_return_real(mcts.root.state) - TreeEnv.get_return_real(sts))
+
+    # ret_node = []
+    # for i in range(TreeEnv.adj.shape[0]):
+    #     ret_node.append([rew]*len(mcts.sts_node[i]))
+
     ret_node = []
     for i in range(TreeEnv.adj.shape[0]):
-        ret_node.append([rew]*len(mcts.sts_node[i]))
+        temp = []
+        for sts in mcts.sts_node[i]:
+            temp.append(TreeEnv.get_return_real(mcts.root.state) - TreeEnv.get_return_real(sts))
+        ret_node.append(temp)
 
     return (mcts.sts_board, mcts.searches_pi_board, ret_board, mcts.sts_node, mcts.searches_pi_node, ret_node)

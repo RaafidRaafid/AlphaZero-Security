@@ -82,12 +82,12 @@ class Trainer:
         loss_value = self.value_criterion(z, returns.view(returns.size()[0],1))
 
         #print(loss_policy, loss_value)
-        loss = loss_policy + loss_value
+        loss = 0.5*loss_policy + loss_value
         loss.backward()
         self.optimizer.step()
 
         #self.getBack(loss.grad_fn)
 
-        print("-------------------------------------------------------- ", loss_policy, loss_value)
+        # print("-------------------------------------------------------- ", 0.5*loss_policy, loss_value)
 
         return loss

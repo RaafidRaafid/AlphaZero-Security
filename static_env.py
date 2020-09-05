@@ -24,3 +24,7 @@ class staticEnv:
     @staticmethod
     def get_return(state, step_idx):
         raise NotImplementedError
+
+    @staticmethod
+    def get_return_real(state, step_idx):
+        raise NotImplementedError

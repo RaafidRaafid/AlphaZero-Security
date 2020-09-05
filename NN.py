@@ -78,7 +78,7 @@ class GCNBoard(nn.Module):
         super(GCNBoard, self).__init__()
 
         self.gc1 = GraphConvolution(nfeat, nhid)
-        self.gc2 = GraphConvolution(nhid, nresourcees)
+        self.gc2 = GraphConvolution(nhid, nresourcees+1)
         self.gc3 = GraphConvolution(nhid, 1)
         self.c1 = ConvNet(nnodes, 1)
         self.c2 = ConvNet(nnodes, 1)

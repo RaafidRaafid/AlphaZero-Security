@@ -34,11 +34,12 @@ def symm_normalize(mtx):
     mtx = mtx.dot(r_mat_inv)
     return mtx
 
-def read_env_data(adj, node_info):
+def read_env_data(adj, node_info, out):
     adj = np.array(readFromTxt(adj))
     adj = symm_normalize(adj)
     node_info = np.array(readFromTxt(node_info))
     alloc = node_info[0]
     P_val = node_info[1]
+    out = np.array(readFromTxt(out))
 
-    return np.array(adj), np.array(alloc), np.array(P_val)
+    return np.array(adj), np.array(alloc), np.array(P_val), out
