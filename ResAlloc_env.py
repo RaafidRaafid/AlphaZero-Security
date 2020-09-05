@@ -7,11 +7,13 @@ class gameEnv(staticEnv):
 
     init_alloc = None
     P_val = None
+    out = None
 
     def __init__(self):
-        self.adj, self.alloc, self.P_val = read_env_data("adj.txt", "node_info.txt")
+        self.adj, self.alloc, self.P_val, self.out = read_env_data("data/adj.txt", "data/node_info_0.txt", "data/out_0.txt")
         gameEnv.init_alloc = self.alloc
         gameEnv.P_val = self.P_val
+        gameEnv.out = self.out
         self.degree = np.zeros(self.adj.shape[0], dtype=int)
         for i in range(self.adj.shape[0]):
             for j in range(self.adj.shape[1]):
@@ -47,6 +49,8 @@ class gameEnv(staticEnv):
 
     @staticmethod
     def next_state(alloc_state, action, type):
+        if action == -1:
+            return alloc_state
         temp_state = np.array([0.0]*len(alloc_state))
         temp_state[:] = alloc_state[:]
         if type == 'board':
@@ -61,7 +65,7 @@ class gameEnv(staticEnv):
 
     @staticmethod
     def is_done_state(step_idx):
-        return step_idx >= 10
+        return step_idx >= 30
         '''
         depth of the MCTS tree
         '''
@@ -82,3 +86,8 @@ class gameEnv(staticEnv):
             before += gameEnv.init_alloc[i]*gameEnv.P_val[i]
             after += alloc_state[i]*gameEnv.P_val[i]
         return after-before
+
+    @staticmethod
+    def get_return_real(alloc_state):
+        # print(np.sum(alloc_state*gameEnv.out) - np.sum(gameEnv.init_alloc*gameEnv.out))
+        return  np.sum(alloc_state*gameEnv.out) - np.sum(gameEnv.init_alloc*gameEnv.out)

@@ -27,7 +27,7 @@ class ConvNet(Module):
             self.bias.data.uniform_(-stdv, stdv)
 
     def forward(self, input):
-        output = torch.mm(input, self.weight)
+        output = torch.matmul(input, self.weight)
         if self.bias is not None:
             return output + self.bias
         else:
@@ -58,8 +58,11 @@ class GraphConvolution(Module):
             self.bias.data.uniform_(-stdv, stdv)
 
     def forward(self, input, adj):
-        support = torch.mm(input, self.weight)
-        output = torch.mm(adj, support)
+        support = torch.matmul(input, self.weight)
+        if len(support.size()) == 3:
+            output = torch.matmul(adj.view(1,adj.size()[0],adj.size()[1]), support)
+        else:
+            output = torch.matmul(adj, support)
         if self.bias is not None:
             return output + self.bias
         else:
@@ -75,7 +78,7 @@ class GCNBoard(nn.Module):
         super(GCNBoard, self).__init__()
 
         self.gc1 = GraphConvolution(nfeat, nhid)
-        self.gc2 = GraphConvolution(nhid, nresourcees)
+        self.gc2 = GraphConvolution(nhid, nresourcees+1)
         self.gc3 = GraphConvolution(nhid, 1)
         self.c1 = ConvNet(nnodes, 1)
         self.c2 = ConvNet(nnodes, 1)
@@ -91,24 +94,32 @@ class GCNBoard(nn.Module):
         x2 = self.gc2(x, adj)
         y = self.gc3(x, adj)
 
-        x2 = torch.transpose(x2,0,1)
-        y = torch.transpose(y,0,1)
+        if len(x2.size())==3:
+            x2 = x2.permute(0,2,1)
+            y = y.permute(0,2,1)
+        else:
+            x2 = x2.permute(1,0)
+            y = y.permute(1,0)
 
         #print(x2.requires_grad)
         finx = self.c1(x2)
-        finy = self.c2(y).view(-1)
+        finy = self.c2(y)
+
+        finx = finx.view(finx.size()[:-1])
+        finy = finy.view(finy.size()[:-1])
+        #finy = self.c2(y).view(y.size()[:-1])
 
 
-        return F.softmax(finx, dim=1), finy
+        return finx, F.softmax(finx, dim=0), finy
 
     def step(self, x, adj):
         x = torch.FloatTensor(x)
         adj = torch.FloatTensor(adj)
 
-        pi, v = self.forward(x,adj)
+        _, pi, v = self.forward(x,adj)
         #pi, v = pi.detach().numpy().flatten(), v.detach().numpy()
         #return pi.detach().numpy().flatten(), v.detach().numpy()[0]
-        return pi.flatten(), v[0]
+        return pi, v[0]
 
 class GCNNode(nn.Module):
 
@@ -131,20 +142,29 @@ class GCNNode(nn.Module):
         x2 = self.gc2(x, adj)
         y = self.gc3(x, adj)
 
-        x2 = torch.transpose(x2,0,1)
-        y = torch.transpose(y,0,1)
+        if len(x2.size())==3:
+            x2 = x2.permute(0,2,1)
+            y = y.permute(0,2,1)
+        else:
+            x2 = x2.permute(1,0)
+            y = y.permute(1,0)
 
         finx = self.c1(x2)
-        finy = self.c2(y).view(-1)
+        finy = self.c2(y)
 
-        return F.softmax(finx, dim=1), finy
+
+        finx = finx.view(finx.size()[:-1])
+        finy = finy.view(finy.size()[:-1])
+        #finy = self.c2(y).view(y.size()[:-1])
+
+        return finx, F.softmax(finx, dim=0), finy
 
     def step(self, x, adj):
 
         x = torch.FloatTensor(x)
         adj = torch.FloatTensor(adj)
 
-        pi, v = self.forward(x,adj)
+        _, pi, v = self.forward(x,adj)
         #pi, v = pi.detach().numpy().flatten(), v.detach().numpy()
         #return pi.detach().numpy().flatten(), v.detach().numpy()[0]
-        return pi.flatten(), v[0]
+        return pi, v[0]

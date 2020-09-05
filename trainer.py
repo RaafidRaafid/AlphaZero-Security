@@ -10,20 +10,21 @@ class Trainer:
         self.step_model = Policy()
         self.env = env
         self.type = type
+        self.learning_rate = learning_rate
 
         self.value_criterion = nn.MSELoss()
-        self.optimizer = torch.optim.SGD(self.step_model.parameters(),lr=learning_rate)
+        self.optimizer = torch.optim.Adam(self.step_model.parameters(),lr=self.learning_rate)
 
     def getBack(self, var_grad_fn):
+        # print(var_grad_fn)
         for n in var_grad_fn.next_functions:
             if n[0]:
                 try:
                     tensor = getattr(n[0], 'variable')
-                    # print("paisi", n[0])
-                    # print('Tensor with grad found:', tensor)
-                    # print(' - gradient:', tensor.grad)
+                    print("paisi", n[0], tensor.grad.size())
+                    # print('Tensor with grad found:', tensor.size())
+                    print(' - gradient:', tensor.grad)
                     # print()
-                    print(tensor.requires_grad, tensor.size(), tensor.grad)
                 except AttributeError as e:
                     self.getBack(n[0])
 
@@ -46,42 +47,47 @@ class Trainer:
 
         value = []
         policy = []
+        logits = []
 
         self.optimizer.zero_grad()
-
 
         search_pis = torch.FloatTensor(search_pis)
         returns = torch.FloatTensor(returns)
 
         adj = torch.FloatTensor(self.env.adj)
+
+        sts = []
         for state in states:
             state = torch.FloatTensor(self.prep_input(state))
+            sts.append(state)
 
-            y,z = self.step_model(state, adj)
+        states = torch.stack(sts)
 
-            policy.append(y.flatten())
-            value.append(z)
-
-        policy = torch.cat(policy, 0)
-        value = torch.cat(value, 0)
-
-        #print(policy, search_pis)
+        logits, y, z = self.step_model(states, adj)
+        # for state in states:
+        #     state = torch.FloatTensor(self.prep_input(state))
+        #
+        #     logit, y,z = self.step_model(state, adj)
+        #
+        #     logits.append(logit.flatten())
+        #     policy.append(y.flatten())
+        #     value.append(z)
 
         logsoftmax = nn.LogSoftmax(dim=1)
-        loss_policy = self.value_criterion(search_pis.flatten(), policy)
-        loss_value = self.value_criterion(value, returns)
+
+        #print(search_pis, logsoftmax(logits), -search_pis*logsoftmax(logits))
+        #print(search_pis, logits, search_pis-logits, logsoftmax(logits), -search_pis*logsoftmax(logits), torch.sum(-search_pis*logsoftmax(logits), dim=1))
+        loss_policy = torch.mean(torch.sum(-search_pis*logsoftmax(logits), dim=1))
+        #loss_policy = torch.mean(torch.sum(-logits*logsoftmax(search_pis), dim=1))
+        loss_value = self.value_criterion(z, returns.view(returns.size()[0],1))
 
         #print(loss_policy, loss_value)
-        loss = loss_policy + loss_value
+        loss = 0.5*loss_policy + loss_value
         loss.backward()
         self.optimizer.step()
-        #print(loss_value.grad_fn)
 
-        if self.type == 'board':
-            self.getBack(loss.grad_fn)
-            #print(self.step_model.gc2.weight)
-            # x,y = self.step_model(torch.FloatTensor(self.prep_input(gameEnv.init_alloc)), adj)
-            # print(x,y)
-        print("--------------------------------------------------------")
+        #self.getBack(loss.grad_fn)
+
+        # print("-------------------------------------------------------- ", 0.5*loss_policy, loss_value)
 
         return loss
