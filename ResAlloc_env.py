@@ -90,4 +90,5 @@ class gameEnv(staticEnv):
     @staticmethod
     def get_return_real(alloc_state):
         # print(np.sum(alloc_state*gameEnv.out) - np.sum(gameEnv.init_alloc*gameEnv.out))
-        return  np.sum(alloc_state*gameEnv.out) - np.sum(gameEnv.init_alloc*gameEnv.out)
+        # return  np.sum(alloc_state*gameEnv.out) - np.sum(gameEnv.init_alloc*gameEnv.out)
+        return np.sum(alloc_state*gameEnv.out)

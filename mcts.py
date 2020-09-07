@@ -6,13 +6,13 @@ import numpy as np
 
 # Exploration constant
 # c_PUCT = 1.38
-# c_PUCT = 1.72
-c_PUCT = 2.76
+c_PUCT = 1.72
+# c_PUCT = 2.76
 # Dirichlet noise alpha parameter.
 D_NOISE_ALPHA = 0.1
 # Number of steps into the episode after which we always select the
 # action with highest action probability rather than selecting randomly
-TEMP_THRESHOLD = 4
+TEMP_THRESHOLD = 6
 STOP_CUTTER = 0.0
 
 
@@ -119,7 +119,7 @@ class MCTSNode:
         Action_Score(s, a) = Q(s, a) + U(s, a) as in paper. A high value
         means the node should be traversed.
         """
-        #print(self.child_Q, self.child_U)
+        # print(self.child_Q, self.child_U)
         return self.bad*(self.child_Q + self.child_U)
 
     def select_leaf(self):
@@ -250,16 +250,23 @@ class MCTSNode:
         if self.type == 'node':
             for action in self.n_actions:
                 new_state = self.TreeEnv.next_state(self.state, action, self.type)
+                idx = self.action_idx[action]
                 if (str(self.state),str(new_state)) in MCTSNode.map:
-                    idx = self.action_idx[action]
-                    #self.bad[idx] = (1.0/MCTSNode.map[(str(self.state),str(new_state))])**2
+                    # self.bad[idx] = 1.0 - (0.8)**(MCTSNode.map[(str(self.state),str(new_state))])
                     self.bad[idx] = 1.0/MCTSNode.map[(str(self.state),str(new_state))]
-                    #self.bad[idx] = 1.0
+                    # self.bad[idx] = 1.0
                     #self.bad[idx] = 0.0
+
+                if (self.state == new_state).all():
+                    self.bad[idx] = 0.0
         # This is a deviation from the paper that led to better results in
         # practice (following the MiniGo implementation).
         #self.child_W = np.ones([len(self.n_actions)], dtype=np.float32) * value
 
+        if self.type == 'board':
+            for i in range(3):
+                self.child_prior[i+1] += (self.child_prior[0]*(1-STOP_CUTTER))/3
+            self.child_prior[0] = self.child_prior[0]*STOP_CUTTER
 
         self.backup_value(value, up_to=up_to)
 
@@ -273,6 +280,8 @@ class MCTSNode:
         if self.parent is None or self is up_to:
             return
         self.parent.backup_value(value, up_to)
+        # self.parent.backup_value(value*(0.9 + STOP_CUTTER/10.0), up_to)
+        # self.parent.backup_value(value*1.05, up_to)
         # self.parent.backup_value(value*0.95, up_to)
 
     def is_done(self):
@@ -283,6 +292,7 @@ class MCTSNode:
     def inject_noise(self):
         dirch = np.random.dirichlet([D_NOISE_ALPHA] * len(self.n_actions))
         self.child_prior = self.child_prior * 0.75 + dirch * 0.25
+
         if self.type == 'board':
             for i in range(3):
                 self.child_prior[i+1] += (self.child_prior[0]*(1-STOP_CUTTER))/3
@@ -441,9 +451,13 @@ class MCTS:
             if self.root.n_actions[i] in self.root.children:
                 self.root.child_N[i] = self.root.children[self.root.n_actions[i]].N
 
-        print(self.root.state, self.root.type, self.root.n_actions)
-        print("kahini ki ", self.root.original_prior, self.root.child_prior)
-        print("pailam ki ", self.root.child_W, self.root.child_N+1, self.root.child_W/(self.root.child_N+1))
+        # print(self.root.state, self.root.type, self.root.n_actions)
+        if self.root.type == 'board':
+            print("kahini ki ", self.root.original_prior, self.root.child_prior)
+            print("pailam ki ", self.root.child_W, self.root.child_N+1, self.root.child_W/(self.root.child_N+1))
+
+        else:
+            print("magic mamoni ", self.root.n_actions, self.root.bad)
 
         if self.root.depth > self.temp_threshold:
             action_idx = np.argmax(self.root.bad*self.root.child_N)
@@ -551,6 +565,7 @@ def execute_episode(board_netw, node_netw, num_simulations, TreeEnv, stop_cutter
     ret_board = []
     for sts in mcts.sts_board:
         ret_board.append(TreeEnv.get_return_real(mcts.root.state) - TreeEnv.get_return_real(sts))
+        # ret_board.append(TreeEnv.get_return_real(mcts.root.state))
 
     # ret_node = []
     # for i in range(TreeEnv.adj.shape[0]):
@@ -561,6 +576,7 @@ def execute_episode(board_netw, node_netw, num_simulations, TreeEnv, stop_cutter
         temp = []
         for sts in mcts.sts_node[i]:
             temp.append(TreeEnv.get_return_real(mcts.root.state) - TreeEnv.get_return_real(sts))
+            # temp.append(TreeEnv.get_return_real(mcts.root.state))
         ret_node.append(temp)
 
     return (mcts.sts_board, mcts.searches_pi_board, ret_board, mcts.sts_node, mcts.searches_pi_node, ret_node)
