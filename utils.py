@@ -39,7 +39,9 @@ def read_env_data(adj, node_info, out):
     adj = symm_normalize(adj)
     node_info = np.array(readFromTxt(node_info))
     alloc = node_info[0]
-    P_val = node_info[1]
+    features = np.array(node_info[1:])
+    features = np.stack(features, axis=0 )
+    features = col_normalize(features)
     out = np.array(readFromTxt(out))
 
-    return np.array(adj), np.array(alloc), np.array(P_val), out
+    return np.array(adj), np.array(alloc), np.array(features), out

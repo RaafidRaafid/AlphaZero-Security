@@ -84,10 +84,11 @@ class GCNBoard(nn.Module):
         self.c2 = ConvNet(nnodes, 1)
         self.dropout = dropout
 
-    def forward(self, x, adj):
+    def forward(self, x, feat, adj):
         '''
         experiment with dropout
         '''
+        x = torch.cat((x, feat), dim=-1)
         x = F.relu(self.gc1(x, adj))
         #x = F.dropout(x, self.dropout, training=self.training)
         #print(self.c1.weight)
@@ -112,11 +113,12 @@ class GCNBoard(nn.Module):
 
         return finx, F.softmax(finx, dim=0), finy
 
-    def step(self, x, adj):
+    def step(self, x, feat, adj):
         x = torch.FloatTensor(x)
+        feat = torch.FloatTensor(feat)
         adj = torch.FloatTensor(adj)
 
-        _, pi, v = self.forward(x,adj)
+        _, pi, v = self.forward(x, feat, adj)
         #pi, v = pi.detach().numpy().flatten(), v.detach().numpy()
         #return pi.detach().numpy().flatten(), v.detach().numpy()[0]
         return pi, v[0]
@@ -132,11 +134,11 @@ class GCNNode(nn.Module):
         self.c2 = ConvNet(nnodes, 1)
         self.dropout = dropout
 
-    def forward(self, x, adj):
+    def forward(self, x, feat, adj):
         '''
         experiment with dropout
         '''
-
+        x = torch.cat((x, feat), dim=-1)
         x = F.relu(self.gc1(x, adj))
         #x = F.dropout(x, self.dropout, training=self.training)
         x2 = self.gc2(x, adj)
@@ -159,12 +161,30 @@ class GCNNode(nn.Module):
 
         return finx, F.softmax(finx, dim=0), finy
 
-    def step(self, x, adj):
+    def step(self, x, feat, adj):
 
         x = torch.FloatTensor(x)
+        torch.FloatTensor(feat)
         adj = torch.FloatTensor(adj)
 
-        _, pi, v = self.forward(x,adj)
+        _, pi, v = self.forward(x, feat, adj)
         #pi, v = pi.detach().numpy().flatten(), v.detach().numpy()
         #return pi.detach().numpy().flatten(), v.detach().numpy()[0]
         return pi, v[0]
+
+class RepresentationFunc(nn.Module):
+    def __init__(self, nin, nhid, nout):
+        super(RepresentationFunc, self).__init__()
+
+        self.gc1 = GraphConvolution(nin, nhid)
+        self.gc2 = GraphConvolution(nhid, nout)
+
+    def forward(self, x, adj):
+        x = F.relu(self.gc1(x, adj))
+        x = F.relu(self.gc2(x,adj))
+        return x
+
+    def step(self, x, adj):
+        x = torch.FloatTensor(x)
+        adj = torch.FloatTensor(adj)
+        return self.forward(x, adj)

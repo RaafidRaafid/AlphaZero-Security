@@ -5,9 +5,10 @@ from ResAlloc_env import gameEnv
 
 class Trainer:
 
-    def __init__(self, Policy, env, type, learning_rate=0.1):
+    def __init__(self, Policy, representation, env, type, learning_rate=0.1):
 
         self.step_model = Policy()
+        self.representation = representation()
         self.env = env
         self.type = type
         self.learning_rate = learning_rate
@@ -38,12 +39,19 @@ class Trainer:
         inp = np.zeros((len(state), len(r)))
         for i in range(len(r)):
             inp[r[i]][i] = 1.0
-        inp = np.hstack((inp, np.zeros((inp.shape[0], 1), dtype=inp.dtype)))
-        for i in range(inp.shape[0]):
-            inp[i][-1] = self.env.P_val[i]
+        # inp = np.hstack((inp, np.zeros((inp.shape[0], 1), dtype=inp.dtype)))
+        # for i in range(inp.shape[0]):
+        #     inp[i][-1] = self.env.P_val[i]
         return inp
 
-    def train(self, states, search_pis, returns):
+    def train(self, states, feats, search_pis, returns):
+
+        adj = torch.FloatTensor(self.env.adj)
+
+        feat_mat = []
+        for feat in feats:
+            feat_mat.append(self.representation(torch.FloatTensor(feat), adj))
+        feat_mat = torch.stack(feat_mat)
 
         value = []
         policy = []
@@ -54,7 +62,6 @@ class Trainer:
         search_pis = torch.FloatTensor(search_pis)
         returns = torch.FloatTensor(returns)
 
-        adj = torch.FloatTensor(self.env.adj)
 
         sts = []
         for state in states:
@@ -63,7 +70,7 @@ class Trainer:
 
         states = torch.stack(sts)
 
-        logits, y, z = self.step_model(states, adj)
+        logits, y, z = self.step_model(states, feat_mat, adj)
         # for state in states:
         #     state = torch.FloatTensor(self.prep_input(state))
         #
@@ -86,8 +93,8 @@ class Trainer:
         loss.backward()
         self.optimizer.step()
 
-        #self.getBack(loss.grad_fn)
+        # self.getBack(loss.grad_fn)
 
-        # print("-------------------------------------------------------- ", 0.5*loss_policy, loss_value)
+        print("-------------------------------------------------------- ", 0.5*loss_policy, loss_value)
 
         return loss

@@ -9,7 +9,7 @@ class ReplayMemory:
     reached.
     """
 
-    def __init__(self, size, column_shapes, batch_size=16):
+    def __init__(self, size, column_shapes, batch_size=10):
         """
         :param size: Number of experience tuples to be stored in the replay
         memory.
@@ -59,6 +59,7 @@ class ReplayMemory:
         column.
         """
         # assert len(actions) == len(rewards) == len(obs) == len(values)
+        
         num = len(list(rows.values())[0])
         if num==0:
             return

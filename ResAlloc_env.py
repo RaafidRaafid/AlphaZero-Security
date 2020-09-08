@@ -6,13 +6,13 @@ from static_env import staticEnv
 class gameEnv(staticEnv):
 
     init_alloc = None
-    P_val = None
+    features = None
     out = None
 
     def __init__(self, id):
-        self.adj, self.alloc, self.P_val, self.out = read_env_data("data/adj.txt", "data/node_info_" + str(id) + ".txt", "data/out_" + str(id) + ".txt")
+        self.adj, self.alloc, self.features, self.out = read_env_data("data/adj.txt", "data/node_info_" + str(id) + ".txt", "data/out_" + str(id) + ".txt")
         gameEnv.init_alloc = self.alloc
-        gameEnv.P_val = self.P_val
+        gameEnv.features = self.features
         gameEnv.out = self.out
         self.degree = np.zeros(self.adj.shape[0], dtype=int)
         for i in range(self.adj.shape[0]):
@@ -36,16 +36,16 @@ class gameEnv(staticEnv):
     def reset():
         pass
 
-    def step(self, action, type):
-        if type == 'board':
-            return self.alloc
-        if self.alloc[action[0]] == 0 or self.alloc[action[1]] == 1:
-            return None, None, None
-        self.alloc[action[0]] = 0
-        self.alloc[action[1]] = 1
-        reward = self.P_val[action[1]] - self.P_val[action[0]]
-
-        return self.alloc, reward
+    # def step(self, action, type):
+    #     if type == 'board':
+    #         return self.alloc
+    #     if self.alloc[action[0]] == 0 or self.alloc[action[1]] == 1:
+    #         return None, None, None
+    #     self.alloc[action[0]] = 0
+    #     self.alloc[action[1]] = 1
+    #     reward = self.features[action[1]] - self.features[action[0]]
+    #
+    #     return self.alloc, reward
 
     @staticmethod
     def next_state(alloc_state, action, type):
@@ -83,8 +83,8 @@ class gameEnv(staticEnv):
         before = 0.0
         after = 0.0
         for i in range(len(gameEnv.init_alloc)):
-            before += gameEnv.init_alloc[i]*gameEnv.P_val[i]
-            after += alloc_state[i]*gameEnv.P_val[i]
+            before += gameEnv.init_alloc[i]*gameEnv.features[i]
+            after += alloc_state[i]*gameEnv.features[i]
         return after-before
 
     @staticmethod
