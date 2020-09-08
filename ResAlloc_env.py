@@ -9,8 +9,8 @@ class gameEnv(staticEnv):
     P_val = None
     out = None
 
-    def __init__(self):
-        self.adj, self.alloc, self.P_val, self.out = read_env_data("data/adj.txt", "data/node_info_0.txt", "data/out_0.txt")
+    def __init__(self, id):
+        self.adj, self.alloc, self.P_val, self.out = read_env_data("data/adj.txt", "data/node_info_" + str(id) + ".txt", "data/out_" + str(id) + ".txt")
         gameEnv.init_alloc = self.alloc
         gameEnv.P_val = self.P_val
         gameEnv.out = self.out

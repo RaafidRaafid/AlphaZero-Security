@@ -58,7 +58,7 @@ class Trainer:
 
         sts = []
         for state in states:
-            state = torch.FloatTensor(self.prep_input(state))
+            state = torch.FloatTensor(state)
             sts.append(state)
 
         states = torch.stack(sts)

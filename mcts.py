@@ -9,10 +9,10 @@ import numpy as np
 c_PUCT = 1.72
 # c_PUCT = 2.76
 # Dirichlet noise alpha parameter.
-D_NOISE_ALPHA = 0.1
+D_NOISE_ALPHA = 0.03
 # Number of steps into the episode after which we always select the
 # action with highest action probability rather than selecting randomly
-TEMP_THRESHOLD = 6
+TEMP_THRESHOLD = 4
 STOP_CUTTER = 0.0
 
 
@@ -282,7 +282,7 @@ class MCTSNode:
         self.parent.backup_value(value, up_to)
         # self.parent.backup_value(value*(0.9 + STOP_CUTTER/10.0), up_to)
         # self.parent.backup_value(value*1.05, up_to)
-        # self.parent.backup_value(value*0.95, up_to)
+        # self.parent.backup_value(value*0.997, up_to)
 
     def is_done(self):
         if self.is_expanded and sum(self.bad) == 0.0:
@@ -351,11 +351,6 @@ class MCTS:
         self.simulations_per_move = simulations_per_move
         self.num_parallel = num_parallel
         self.temp_threshold = None        # Overwritten in initialize_search
-
-        self.qs = []
-        self.rewards = []
-        self.searches_pi = []
-        self.sts = []
 
         self.root = None
         MCTSNode.map.clear()
@@ -533,9 +528,9 @@ def execute_episode(board_netw, node_netw, num_simulations, TreeEnv, stop_cutter
 
     while True:
 
-        if mcts.root.type == 'board':
-            x, y = mcts.board_netw.step_model.step(mcts.prep_input(mcts.root.state), mcts.TreeEnv.adj)
-            print("============boom========== ", mcts.root.state, y)
+        # if mcts.root.type == 'board':
+        #     x, y = mcts.board_netw.step_model.step(mcts.prep_input(mcts.root.state), mcts.TreeEnv.adj)
+        #     print("============boom========== ", mcts.root.state, y)
 
         mcts.root.inject_noise()
         current_simulations = mcts.root.N
@@ -578,5 +573,12 @@ def execute_episode(board_netw, node_netw, num_simulations, TreeEnv, stop_cutter
             temp.append(TreeEnv.get_return_real(mcts.root.state) - TreeEnv.get_return_real(sts))
             # temp.append(TreeEnv.get_return_real(mcts.root.state))
         ret_node.append(temp)
+
+    for i in range(len(mcts.sts_board)):
+        mcts.sts_board[i] = mcts.prep_input(mcts.sts_board[i])
+
+    for i in range(len(mcts.sts_node)):
+        for j in range(len(mcts.sts_node[i])):
+            mcts.sts_node[i][j] = mcts.prep_input(mcts.sts_node[i][j])
 
     return (mcts.sts_board, mcts.searches_pi_board, ret_board, mcts.sts_node, mcts.searches_pi_node, ret_node)
