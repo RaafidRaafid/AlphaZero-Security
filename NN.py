@@ -188,3 +188,38 @@ class RepresentationFunc(nn.Module):
         x = torch.FloatTensor(x)
         adj = torch.FloatTensor(adj)
         return self.forward(x, adj)
+
+class ScorePredictionFunc(nn.Module):
+    def __init__(self, nfeat, nhid, nnodes, dropout):
+        super(ScorePredictionFunc, self).__init__()
+        self.gc = GraphConvolution(nfeat, nhid)
+        self.c1 = ConvNet(nhid, 1)
+        self.c2 = ConvNet(nnodes, 1)
+        self.dropout = dropout
+
+    def forward(self, x, feat, adj):
+        '''
+        experiment with dropout
+        '''
+        x = torch.cat((x, feat), dim=-1)
+        x = F.relu(self.gc(x, adj))
+        x2 = self.c1(x)
+
+        if len(x2.size())==3:
+            x2 = x2.permute(0,2,1)
+        else:
+            x2 = x2.permute(1,0)
+
+        finx = F.relu(self.c2(x2))
+
+        finx = finx.view(finx.size()[:-1])
+
+        return finx
+
+    def step(self, x, feat, adj):
+
+        x = torch.FloatTensor(x)
+        torch.FloatTensor(feat)
+        adj = torch.FloatTensor(adj)
+
+        return self.forward(x, feat, adj)

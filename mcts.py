@@ -9,11 +9,12 @@ import numpy as np
 c_PUCT = 1.72
 # c_PUCT = 2.76
 # Dirichlet noise alpha parameter.
-D_NOISE_ALPHA = 0.03
+D_NOISE_ALPHA = 0.1
 # Number of steps into the episode after which we always select the
 # action with highest action probability rather than selecting randomly
 TEMP_THRESHOLD = 4
 STOP_CUTTER = 0.0
+mode = 'train'
 
 
 class DummyNode:
@@ -163,6 +164,7 @@ class MCTSNode:
             if node.type == 'board':
                 if action == -1:
                     node.children[action] = MCTSNode(new_state, [], node.TreeEnv, type = 'board', action = node.action_idx[action], parent=node)
+                    # urgent, what is this?
                     node.children[action].is_stopper = True
                 else:
                     node.children[action] = MCTSNode(new_state, node.TreeEnv.actions[action], node.TreeEnv, type = 'node', action=node.action_idx[action], parent=node)
@@ -331,7 +333,7 @@ class MCTS:
     the tree search.
     """
 
-    def __init__(self, board_netw, node_netw, TreeEnv, seconds_per_move=None,
+    def __init__(self, board_netw, node_netw, score_netw, representation, TreeEnv, seconds_per_move=None,
                  simulations_per_move=800, num_parallel=1):
         """
         :param agent_netw: Network for predicting action probabilities and
@@ -346,6 +348,8 @@ class MCTS:
         """
         self.board_netw = board_netw
         self.node_netw = node_netw
+        self.score_netw = score_netw
+        self. representation = representation
         self.TreeEnv = TreeEnv
         self.seconds_per_move = seconds_per_move
         self.simulations_per_move = simulations_per_move
@@ -356,10 +360,11 @@ class MCTS:
         MCTSNode.map.clear()
         MCTSNode.count = 0.0
 
-        self.feature_mat_board = self.board_netw.representation.step(TreeEnv.features, self.TreeEnv.adj)
-        self.feature_mat_node = []
-        for i in range(TreeEnv.adj.shape[0]):
-            self.feature_mat_node.append(self.node_netw[i].representation.step(TreeEnv.features, self.TreeEnv.adj))
+        self.score_map = {}
+        self.score_states = []
+        self.scores = []
+
+        self.feature_mat = self.representation.step_model.step(TreeEnv.features, self.TreeEnv.adj)
 
     def initialize_search(self, state=None):
         init_state = self.TreeEnv.initial_state()
@@ -425,17 +430,25 @@ class MCTS:
             #     continue
 
             if leaf.is_done() or leaf.is_stopper:
-                value = self.TreeEnv.get_return_real(leaf.state)
+                if mode == 'train':
+                    value = self.TreeEnv.get_return_real(leaf.state)
+                    if self.hash(leaf.state) not in self.score_map:
+                        self.score_states.append(self.prep_input(leaf.state))
+                        self.scores.append(value)
+                        self.score_map[self.hash(leaf.state)] = 1
+                else:
+                    value = self.score_netw.step_model.step(self.prep_input(leaf.state), self.feature_mat, self.TreeEnv.adj)
+
                 leaf.backup_value(value, up_to=self.root)
                 continue
             if leaf.type == 'board':
                 # input prep
-                x, y = self.board_netw.step_model.step(self.prep_input(leaf.state), self.feature_mat_board, self.TreeEnv.adj)
+                x, y = self.board_netw.step_model.step(self.prep_input(leaf.state), self.feature_mat, self.TreeEnv.adj)
                 x = x.data.numpy()
                 y = y.data.numpy()
             else:
                 idx = leaf.parent.idx_action[leaf.action]
-                x, y = self.node_netw[idx].step_model.step(self.prep_input(leaf.state),self.feature_mat_node[idx], self.TreeEnv.adj)
+                x, y = self.node_netw[idx].step_model.step(self.prep_input(leaf.state),self.feature_mat, self.TreeEnv.adj)
                 x = x.data.numpy()
                 y = y.data.numpy()
 
@@ -451,13 +464,14 @@ class MCTS:
             if self.root.n_actions[i] in self.root.children:
                 self.root.child_N[i] = self.root.children[self.root.n_actions[i]].N
 
-        print(self.root.state, self.root.type, self.root.n_actions)
-        if self.root.type == 'board':
-            print("kahini ki ", self.root.original_prior, self.root.child_prior)
-            print("pailam ki ", self.root.child_W, self.root.child_N+1, self.root.child_W/(self.root.child_N+1))
+        # print(self.root.state, self.root.type, self.root.n_actions)
+        if mode == 'test':
+            if self.root.type == 'board':
+                print("kahini ki ", self.root.original_prior, self.root.child_prior)
+                print("pailam ki ", self.root.child_W, self.root.child_N+1, self.root.child_W/(self.root.child_N+1))
 
-        else:
-            print("magic mamoni ", self.root.n_actions, self.root.bad)
+            else:
+                print("magic mamoni ", self.root.n_actions, self.root.bad)
 
         if self.root.depth > self.temp_threshold:
             action_idx = np.argmax(self.root.bad*self.root.child_N)
@@ -514,19 +528,21 @@ class MCTS:
         #del self.root.parent.children
 
 
-def execute_episode(board_netw, node_netw, num_simulations, TreeEnv, stop_cutter):
+def execute_episode(board_netw, node_netw, score_netw, representation, num_simulations, TreeEnv, curr_mode, stop_cutter):
 
     global STOP_CUTTER
     STOP_CUTTER = stop_cutter
+    global mode
+    mode = curr_mode
 
-    mcts = MCTS(board_netw, node_netw, TreeEnv)
+    mcts = MCTS(board_netw, node_netw, score_netw, representation, TreeEnv)
 
     mcts.initialize_search()
 
     # Must run this once at the start, so that noise injection actually affects
     # the first action of the episode.
     first_node = mcts.root.select_leaf()
-    probs, vals = board_netw.step_model.step(mcts.prep_input(first_node.state), mcts.feature_mat_board, TreeEnv.adj)
+    probs, vals = board_netw.step_model.step(mcts.prep_input(first_node.state), mcts.feature_mat, TreeEnv.adj)
     probs = probs.data.numpy()
     vals = vals.data.numpy()
     first_node.incorporate_estimates(probs, vals, first_node)
@@ -553,31 +569,44 @@ def execute_episode(board_netw, node_netw, num_simulations, TreeEnv, stop_cutter
 
         if mcts.root.is_done() or mcts.root.is_stopper:
             print("chong ", sum(mcts.root.bad), mcts.root.depth, len(MCTSNode.map), MCTSNode.count)
+            print("huahua~~~~ ", mcts.score_netw.step_model.step(mcts.prep_input(mcts.root.state), mcts.feature_mat, mcts.TreeEnv.adj))
             break
 
     # Computes the returns at each step from the list of rewards obtained at
     # each step. The return is the sum of rewards obtained *after* the step.
 
-    #state, search_pi, q, reward
-    rew = TreeEnv.get_return_real(mcts.root.state)
-    # ret_board = [rew]*len(mcts.sts_board)
+    if mode == 'train':
+        rew = TreeEnv.get_return_real(mcts.root.state)
+    else:
+        rew = mcts.score_netw.step_model.step(mcts.prep_input(mcts.root.state), mcts.feature_mat, mcts.TreeEnv.adj)
 
     ret_board = []
     for sts in mcts.sts_board:
-        # ret_board.append(TreeEnv.get_return_real(mcts.root.state) - TreeEnv.get_return_real(sts))
-        ret_board.append(TreeEnv.get_return_real(mcts.root.state))
+        # if mode == 'train':
+        #     temp.append(rew - TreeEnv.get_return_real(sts))
+        # else:
+        #     temp.append(rew - mcts.score_netw.step_model.step(mcts.prep_input(sts), mcts.feature_mat, mcts.TreeEnv.adj))
+
+        ret_board.append(rew)
+
 
     # ret_node = []
     # for i in range(TreeEnv.adj.shape[0]):
     #     ret_node.append([rew]*len(mcts.sts_node[i]))
 
+
     ret_node = []
     for i in range(TreeEnv.adj.shape[0]):
         temp = []
         for sts in mcts.sts_node[i]:
-            # temp.append(TreeEnv.get_return_real(mcts.root.state) - TreeEnv.get_return_real(sts))
-            temp.append(TreeEnv.get_return_real(mcts.root.state))
+            # if mode == 'train':
+            #     temp.append(rew - TreeEnv.get_return_real(sts))
+            # else:
+            #     temp.append(rew - mcts.score_netw.step_model.step(mcts.prep_input(sts), mcts.feature_mat, mcts.TreeEnv.adj))
+
+            temp.append(rew)
         ret_node.append(temp)
+
 
     for i in range(len(mcts.sts_board)):
         mcts.sts_board[i] = mcts.prep_input(mcts.sts_board[i])
@@ -586,4 +615,4 @@ def execute_episode(board_netw, node_netw, num_simulations, TreeEnv, stop_cutter
         for j in range(len(mcts.sts_node[i])):
             mcts.sts_node[i][j] = mcts.prep_input(mcts.sts_node[i][j])
 
-    return (mcts.sts_board, mcts.searches_pi_board, ret_board, mcts.sts_node, mcts.searches_pi_node, ret_node)
+    return (mcts.sts_board, mcts.searches_pi_board, ret_board, mcts.sts_node, mcts.searches_pi_node, ret_node, mcts.score_states, mcts.scores)
