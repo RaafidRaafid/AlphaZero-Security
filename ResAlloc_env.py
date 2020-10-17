@@ -10,7 +10,8 @@ class gameEnv(staticEnv):
     out = None
 
     def __init__(self, id):
-        self.adj, self.alloc, self.features, self.out = read_env_data("data/adj.txt", "data/node_info_" + str(id) + ".txt", "data/out_" + str(id) + ".txt")
+        self.adj, self.alloc, self.features, self.out, self.edge_index = read_env_data("data/adj.txt", "data/node_info_" + str(id) + ".txt", "data/out_" + str(id) + ".txt")
+        self.out = self.out.flatten()
         gameEnv.init_alloc = self.alloc
         gameEnv.features = self.features
         gameEnv.out = self.out
@@ -91,4 +92,4 @@ class gameEnv(staticEnv):
     def get_return_real(alloc_state):
         # print(np.sum(alloc_state*gameEnv.out) - np.sum(gameEnv.init_alloc*gameEnv.out))
         # return  np.sum(alloc_state*gameEnv.out) - np.sum(gameEnv.init_alloc*gameEnv.out)
-        return np.sum(alloc_state*gameEnv.out)
+        return np.sum(alloc_state*gameEnv.out)/3.0

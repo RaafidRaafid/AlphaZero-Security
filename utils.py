@@ -36,7 +36,14 @@ def symm_normalize(mtx):
 
 def read_env_data(adj, node_info, out):
     adj = np.array(readFromTxt(adj))
+    edge_index = [[], []]
+    for i in range(adj.shape[0]):
+        for j in range(adj.shape[0]):
+            if adj[i][j] > 0.0:
+                edge_index[0].append(i)
+                edge_index[1].append(j)
     adj = symm_normalize(adj)
+
     node_info = np.array(readFromTxt(node_info))
     alloc = node_info[0]
     features = np.array(node_info[1:])
@@ -44,4 +51,4 @@ def read_env_data(adj, node_info, out):
     features = col_normalize(features)
     out = np.array(readFromTxt(out))
 
-    return np.array(adj), np.array(alloc), np.array(features), out
+    return np.array(adj), np.array(alloc), np.array(features), out, edge_index

@@ -5,12 +5,14 @@ import math
 from torch.nn.parameter import Parameter
 from torch.nn.modules.module import Module
 import torch.nn.functional as F
+from torch_geometric.nn import MessagePassing
+from torch_geometric.utils import add_self_loops, degree
 from utils import *
 
-class ConvNet(Module):
+class denseNet(Module):
 
     def __init__(self, in_feat, out_feat, bias=True):
-        super(ConvNet, self).__init__()
+        super(denseNet, self).__init__()
         self.in_feat = in_feat
         self.out_feat = out_feat
         self.weight = Parameter(torch.FloatTensor(in_feat, out_feat))
@@ -38,136 +40,106 @@ class ConvNet(Module):
                + str(self.in_features) + ' -> ' \
                + str(self.out_features) + ')'
 
-class GraphConvolution(Module):
+class GCNConv(MessagePassing):
+    def __init__(self, in_channels, out_channels):
+        super(GCNConv, self).__init__(aggr='add')  # "Add" aggregation
+        self.lin = torch.nn.Linear(in_channels, out_channels)
 
-    def __init__(self, in_feat, out_feat, bias=True):
-        super(GraphConvolution, self).__init__()
-        self.in_feat = in_feat
-        self.out_feat = out_feat
-        self.weight = Parameter(torch.FloatTensor(in_feat, out_feat))
-        if bias:
-            self.bias = Parameter(torch.FloatTensor(out_feat))
-        else:
-            self.register_parameter('bias', None)
-        self.reset_parameters()
+    def forward(self, x, edge_index):
+        # Step 1: Add self-loops
+        edge_index, _ = add_self_loops(edge_index, num_nodes=x.size(0))
 
-    def reset_parameters(self):
-        stdv = 1. / math.sqrt(self.weight.size(1))
-        self.weight.data.uniform_(-stdv, stdv)
-        if self.bias is not None:
-            self.bias.data.uniform_(-stdv, stdv)
+        # Step 2: Multiply with weights
+        x = self.lin(x)
 
-    def forward(self, input, adj):
-        support = torch.matmul(input, self.weight)
-        if len(support.size()) == 3:
-            output = torch.matmul(adj.view(1,adj.size()[0],adj.size()[1]), support)
-        else:
-            output = torch.matmul(adj, support)
-        if self.bias is not None:
-            return output + self.bias
-        else:
-            return output
+        # Step 3: Calculate the normalization
+        row, col = edge_index
+        deg = degree(row, x.size(0), dtype=x.dtype)
+        deg_inv_sqrt = deg.pow(-0.5)
+        norm = deg_inv_sqrt[row] * deg_inv_sqrt[col]
 
-    def __repr__(self):
-        return self.__class__.__name__ + ' (' \
-               + str(self.in_features) + ' -> ' \
-               + str(self.out_features) + ')'
+        # Step 4: Propagate the embeddings to the next layer
+        return self.propagate(edge_index, size=(x.size(0), x.size(0)), x=x, norm=norm)
+
+    def message(self, x_j, norm):
+        # Normalize node features.
+        return norm.view(-1, 1) * x_j
 
 class GCNBoard(nn.Module):
-    def __init__(self, nfeat, nhid, nresourcees, nnodes, dropout):
+    def __init__(self, nfeat, nhid, nresourcees, dropout):
         super(GCNBoard, self).__init__()
 
-        self.gc1 = GraphConvolution(nfeat, nhid)
-        self.gc2 = GraphConvolution(nhid, nresourcees+1)
-        self.gc3 = GraphConvolution(nhid, 1)
-        self.c1 = ConvNet(nnodes, 1)
-        self.c2 = ConvNet(nnodes, 1)
+        self.gc1 = GCNConv(nfeat, nhid)
+        self.gc2 = GCNConv(nhid, nhid)
+        self.cPolicy = denseNet(nhid, nresourcees+1)
+        self.cQ = denseNet(nhid, 1)
         self.dropout = dropout
 
-    def forward(self, x, feat, adj):
+    def forward(self, x, feat, edge_index, is_training):
         '''
         experiment with dropout
         '''
         x = torch.cat((x, feat), dim=-1)
-        x = F.relu(self.gc1(x, adj))
-        #x = F.dropout(x, self.dropout, training=self.training)
-        #print(self.c1.weight)
-        x2 = self.gc2(x, adj)
-        y = self.gc3(x, adj)
 
-        if len(x2.size())==3:
-            x2 = x2.permute(0,2,1)
-            y = y.permute(0,2,1)
-        else:
-            x2 = x2.permute(1,0)
-            y = y.permute(1,0)
+        x = F.relu(self.gc1(x, edge_index))
+        x = F.dropout(x, self.dropout, training = is_training)
 
-        #print(x2.requires_grad)
-        finx = self.c1(x2)
-        finy = self.c2(y)
+        x = F.relu(self.gc2(x, edge_index))
+        x = F.dropout(x, self.dropout, training = is_training)
 
-        finx = finx.view(finx.size()[:-1])
-        finy = finy.view(finy.size()[:-1])
-        #finy = self.c2(y).view(y.size()[:-1])
+        x = torch.max(x, dim = len(x.shape)-2)
 
+        finx = self.cPolicy(x)
+        finy = self.cQ(x)
 
         return finx, F.softmax(finx, dim=0), finy
 
-    def step(self, x, feat, adj):
+    def step(self, x, feat, edge_index):
         x = torch.FloatTensor(x)
         feat = torch.FloatTensor(feat)
-        adj = torch.FloatTensor(adj)
+        edge_index = torch.FloatTensor(edge_index)
 
-        _, pi, v = self.forward(x, feat, adj)
-        #pi, v = pi.detach().numpy().flatten(), v.detach().numpy()
-        #return pi.detach().numpy().flatten(), v.detach().numpy()[0]
+        _, pi, v = self.forward(x, feat, edge_index)
         return pi, v[0]
 
 class GCNNode(nn.Module):
 
-    def __init__(self, nfeat, nhid, ndegree, nnodes, dropout, nidx):
+    def __init__(self, nfeat, nhid, ndegree, dropout, nidx):
         super(GCNNode, self).__init__()
-        self.gc1 = GraphConvolution(nfeat, nhid)
-        self.gc2 = GraphConvolution(nhid, ndegree)
-        self.gc3 = GraphConvolution(nhid, 1)
-        self.c1 = ConvNet(nnodes, 1)
-        self.c2 = ConvNet(nnodes, 1)
+
+        self.gc1 = GCNConv(nfeat, nhid)
+        self.gc2 = GCNConv(nhid, nhid)
+        self.cPolicy = denseNet(nhid, ndegree)
+        self.cQ = denseNet(nhid, 1)
         self.dropout = dropout
 
-    def forward(self, x, feat, adj):
+    def forward(self, x, feat, edge_index):
         '''
         experiment with dropout
         '''
+
         x = torch.cat((x, feat), dim=-1)
-        x = F.relu(self.gc1(x, adj))
-        #x = F.dropout(x, self.dropout, training=self.training)
-        x2 = self.gc2(x, adj)
-        y = self.gc3(x, adj)
 
-        if len(x2.size())==3:
-            x2 = x2.permute(0,2,1)
-            y = y.permute(0,2,1)
-        else:
-            x2 = x2.permute(1,0)
-            y = y.permute(1,0)
+        x = F.relu(self.gc1(x, edge_index))
+        x = F.dropout(x, self.dropout, training = is_training)
 
-        finx = self.c1(x2)
-        finy = self.c2(y)
+        x = F.relu(self.gc2(x, edge_index))
+        x = F.dropout(x, self.dropout, training = is_training)
 
+        x = torch.max(x, dim = len(x.shape)-2)
 
-        finx = finx.view(finx.size()[:-1])
-        finy = finy.view(finy.size()[:-1])
-        #finy = self.c2(y).view(y.size()[:-1])
+        finx = self.cPolicy(x)
+        finy = self.cQ(x)
 
         return finx, F.softmax(finx, dim=0), finy
 
-    def step(self, x, feat, adj):
+    def step(self, x, feat, edge_index):
 
         x = torch.FloatTensor(x)
-        torch.FloatTensor(feat)
-        adj = torch.FloatTensor(adj)
+        feat = torch.FloatTensor(feat)
+        edge_index = torch.LongTensor(edge_index)
 
-        _, pi, v = self.forward(x, feat, adj)
+        _, pi, v = self.forward(x, feat, edge_index)
         #pi, v = pi.detach().numpy().flatten(), v.detach().numpy()
         #return pi.detach().numpy().flatten(), v.detach().numpy()[0]
         return pi, v[0]
@@ -176,50 +148,52 @@ class RepresentationFunc(nn.Module):
     def __init__(self, nin, nhid, nout):
         super(RepresentationFunc, self).__init__()
 
-        self.gc1 = GraphConvolution(nin, nhid)
-        self.gc2 = GraphConvolution(nhid, nout)
+        self.gc1 = GCNConv(nin, nhid)
+        self.gc2 = GCNConv(nhid, nout)
 
-    def forward(self, x, adj):
-        x = F.relu(self.gc1(x, adj))
-        x = F.relu(self.gc2(x,adj))
+    def forward(self, x, edge_index):
+        x = torch.tanh(self.gc1(x, edge_index))
+        x = torch.tanh(self.gc2(x,edge_index))
         return x
 
-    def step(self, x, adj):
+    def step(self, x, edge_index):
         x = torch.FloatTensor(x)
-        adj = torch.FloatTensor(adj)
-        return self.forward(x, adj)
+        edge_index = torch.LongTensor(edge_index)
+        return self.forward(x, edge_index)
 
 class ScorePredictionFunc(nn.Module):
-    def __init__(self, nfeat, nhid, nnodes, dropout):
+    def __init__(self, nfeat, nhid, nhid2, dropout):
         super(ScorePredictionFunc, self).__init__()
-        self.gc = GraphConvolution(nfeat, nhid)
-        self.c1 = ConvNet(nhid, 1)
-        self.c2 = ConvNet(nnodes, 1)
+
+        self.gc1 = GCNConv(nfeat, nhid)
+        self.gc2 = GCNConv(nhid, nhid)
+        self.c1 = denseNet(nhid, nhid2)
+        self.c2 = denseNet(nhid2, 1)
         self.dropout = dropout
 
-    def forward(self, x, feat, adj):
+    def forward(self, x, feat, edge_index):
         '''
         experiment with dropout
         '''
         x = torch.cat((x, feat), dim=-1)
-        x = F.relu(self.gc(x, adj))
-        x2 = self.c1(x)
 
-        if len(x2.size())==3:
-            x2 = x2.permute(0,2,1)
-        else:
-            x2 = x2.permute(1,0)
+        x = F.relu(self.gc1(x, edge_index))
+        x = F.dropout(x, self.dropout, training = is_training)
 
-        finx = F.relu(self.c2(x2))
+        x = F.relu(self.gc2(x, edge_index))
+        x = F.dropout(x, self.dropout, training = is_training)
 
-        finx = finx.view(finx.size()[:-1])
+        x = torch.max(x, dim = len(x.shape)-2)
 
-        return finx
+        x = torch.tanh(self.c1(x))
+        x = self.c2(x)
 
-    def step(self, x, feat, adj):
+        return x
+
+    def step(self, x, feat, edge_index):
 
         x = torch.FloatTensor(x)
-        torch.FloatTensor(feat)
-        adj = torch.FloatTensor(adj)
+        feat = torch.FloatTensor(feat)
+        edge_index = torch.LongTensor(edge_index)
 
-        return self.forward(x, feat, adj)
+        return self.forward(x, feat, edge_index)

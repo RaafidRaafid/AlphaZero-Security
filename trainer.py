@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import numpy as np
-import torch.nn.functional as F
 from ResAlloc_env import gameEnv
 
 class Representation:
@@ -11,7 +10,7 @@ class Representation:
 
 class ScorePredictionTrainer:
 
-    def __init__(self, score_network, representation, env, learning_rate=0.01):
+    def __init__(self, score_network, representation, env, learning_rate=0.05):
         self.step_model = score_network()
         self.representation = representation
         self.env = env
@@ -28,7 +27,8 @@ class ScorePredictionTrainer:
                     tensor = getattr(n[0], 'variable')
                     print("paisi", n[0], tensor.grad.size())
                     # print('Tensor with grad found:', tensor.size())
-                    print(' - gradient:', tensor.grad)
+                    # print(' - gradient:', tensor.grad)
+                    print(' - tens:', tensor)
                     # print()
                 except AttributeError as e:
                     self.getBack(n[0])
@@ -36,11 +36,11 @@ class ScorePredictionTrainer:
         #print("chamatkar?")
 
     def train(self, states, feats, scores):
-        adj = torch.FloatTensor(self.env.adj)
+        edge_index = torch.LongTensor(self.env.edge_index)
 
         feat_mat = []
         for feat in feats:
-            feat_mat.append(self.representation.step_model(torch.FloatTensor(feat), adj))
+            feat_mat.append(torch.FloatTensor(feat))
         feat_mat = torch.stack(feat_mat)
 
         self.optimizer.zero_grad()
@@ -53,15 +53,20 @@ class ScorePredictionTrainer:
         states = torch.stack(sts)
         scores = torch.FloatTensor(scores)
 
-        outputs = self.step_model(states, feat_mat, adj)
+        outputs = self.step_model(states, feat_mat, edge_index)
 
-        loss = self.value_criterion(scores, outputs.view(-1))
-        goss = scores - outputs.view(-1)
+        loss = self.value_criterion(scores.view(scores.size()[0],1), outputs)
+        # loss = self.value_criterion(scores, outputs.view(-1))
         print(scores)
         print(outputs.view(-1))
-        print(abs(goss))
+        print(abs(scores - outputs.view(-1)))
+
         # logsoftmax = nn.LogSoftmax(dim=0)
-        # loss = torch.mean(-F.softmax(scores.view(scores.size()[0],1), dim=0)*logsoftmax(outputs))
+        # loss = torch.mean(-scores*logsoftmax(outputs.view(-1)))
+        # print(scores)
+        # print(outputs.view(-1))
+        # print(-scores*logsoftmax(outputs.view(-1)))
+
         loss.backward()
         self.optimizer.step()
 
@@ -112,11 +117,11 @@ class Trainer:
 
     def train(self, states, feats, search_pis, returns):
 
-        adj = torch.FloatTensor(self.env.adj)
+        edge_index = torch.LongTensor(self.env.edge_index)
 
         feat_mat = []
         for feat in feats:
-            feat_mat.append(self.representation.step_model(torch.FloatTensor(feat), adj))
+            feat_mat.append(self.representation.step_model(torch.FloatTensor(feat), edge_index))
         feat_mat = torch.stack(feat_mat)
 
         value = []
@@ -136,11 +141,11 @@ class Trainer:
 
         states = torch.stack(sts)
 
-        logits, y, z = self.step_model(states, feat_mat, adj)
+        logits, y, z = self.step_model(states, feat_mat, edge_index)
         # for state in states:
         #     state = torch.FloatTensor(self.prep_input(state))
         #
-        #     logit, y,z = self.step_model(state, adj)
+        #     logit, y,z = self.step_model(state, edge_index)
         #
         #     logits.append(logit.flatten())
         #     policy.append(y.flatten())
@@ -153,6 +158,8 @@ class Trainer:
         loss_policy = torch.mean(torch.sum(-search_pis*logsoftmax(logits), dim=1))
         #loss_policy = torch.mean(torch.sum(-logits*logsoftmax(search_pis), dim=1))
         loss_value = self.value_criterion(z, returns.view(returns.size()[0],1))
+
+        # print(abs(z-returns.view(returns.size()[0],1)))
 
         #print(loss_policy, loss_value)
         loss = 0.5*loss_policy + loss_value
