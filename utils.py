@@ -40,6 +40,7 @@ def read_env_data(adj, node_info, out):
     for i in range(adj.shape[0]):
         for j in range(adj.shape[0]):
             if adj[i][j] > 0.0:
+                adj[i][j]=1.0
                 edge_index[0].append(i)
                 edge_index[1].append(j)
     adj = symm_normalize(adj)

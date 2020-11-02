@@ -36,7 +36,6 @@ class ScorePredictionTrainer:
         #print("chamatkar?")
 
     def train(self, states, feats, scores):
-        edge_index = torch.LongTensor(self.env.edge_index)
 
         feat_mat = []
         for feat in feats:
@@ -53,7 +52,7 @@ class ScorePredictionTrainer:
         states = torch.stack(sts)
         scores = torch.FloatTensor(scores)
 
-        outputs = self.step_model(states, feat_mat, edge_index)
+        outputs = self.step_model(states, feat_mat)
 
         loss = self.value_criterion(scores.view(scores.size()[0],1), outputs)
         # loss = self.value_criterion(scores, outputs.view(-1))
@@ -76,7 +75,7 @@ class ScorePredictionTrainer:
 
 class Trainer:
 
-    def __init__(self, Policy, representation, env, type, learning_rate=0.02 ):
+    def __init__(self, Policy, representation, env, type, learning_rate=0.005):
 
         self.step_model = Policy()
         self.representation = representation
@@ -86,6 +85,7 @@ class Trainer:
 
         self.value_criterion = nn.MSELoss()
         self.optimizer = torch.optim.Adam(self.step_model.parameters(),lr=self.learning_rate)
+        self.dayum = []
 
     def getBack(self, var_grad_fn):
         # print(var_grad_fn)
@@ -93,7 +93,7 @@ class Trainer:
             if n[0]:
                 try:
                     tensor = getattr(n[0], 'variable')
-                    print("paisi", n[0], tensor.grad.size())
+                    print("paisi", tensor.grad_fn, tensor.grad.size())
                     # print('Tensor with grad found:', tensor.size())
                     print(' - gradient:', tensor.grad)
                     # print()
@@ -115,18 +115,28 @@ class Trainer:
         #     inp[i][-1] = self.env.P_val[i]
         return inp
 
-    def train(self, states, feats, search_pis, returns):
-
-        edge_index = torch.LongTensor(self.env.edge_index)
+    def train(self, states, feats, search_pis, returns, typee):
 
         feat_mat = []
         for feat in feats:
-            feat_mat.append(self.representation.step_model(torch.FloatTensor(feat), edge_index))
+            # feat_mat.append(self.representation.step_model(torch.FloatTensor(feat)))
+            feat_mat.append(torch.FloatTensor(feat))
         feat_mat = torch.stack(feat_mat)
 
         value = []
         policy = []
         logits = []
+
+        # if len(self.dayum) == 0:
+        #     for i in range(len(search_pis[0])):
+        #         self.dayum.append([])
+        #
+        # for i in range(len(search_pis)):
+        #     for j in range(len(self.dayum)):
+        #         self.dayum[j].append(search_pis[i][j])
+        #
+        # for i in range(len(self.dayum)):
+        #     print(i, np.mean(self.dayum[i]), np.std(self.dayum[i]))
 
         self.optimizer.zero_grad()
 
@@ -141,33 +151,28 @@ class Trainer:
 
         states = torch.stack(sts)
 
-        logits, y, z = self.step_model(states, feat_mat, edge_index)
-        # for state in states:
-        #     state = torch.FloatTensor(self.prep_input(state))
-        #
-        #     logit, y,z = self.step_model(state, edge_index)
-        #
-        #     logits.append(logit.flatten())
-        #     policy.append(y.flatten())
-        #     value.append(z)
-
+        logits, y, z = self.step_model(states, feat_mat)
         logsoftmax = nn.LogSoftmax(dim=1)
+        KLDiv = nn.KLDivLoss(reduction = 'batchmean')
 
         #print(search_pis, logsoftmax(logits), -search_pis*logsoftmax(logits))
         #print(search_pis, logits, search_pis-logits, logsoftmax(logits), -search_pis*logsoftmax(logits), torch.sum(-search_pis*logsoftmax(logits), dim=1))
+
         loss_policy = torch.mean(torch.sum(-search_pis*logsoftmax(logits), dim=1))
+
+        # loss_policy = KLDiv(logsoftmax(y), search_pis)
+
         #loss_policy = torch.mean(torch.sum(-logits*logsoftmax(search_pis), dim=1))
         loss_value = self.value_criterion(z, returns.view(returns.size()[0],1))
 
         # print(abs(z-returns.view(returns.size()[0],1)))
 
         #print(loss_policy, loss_value)
-        loss = 0.5*loss_policy + loss_value
+        loss = loss_policy + loss_value
         loss.backward()
         self.optimizer.step()
 
-        # self.getBack(loss.grad_fn)
+        # if typee=="board":
+        #     self.getBack(loss.grad_fn)
 
-        # print("-------------------------------------------------------- ", 0.5*loss_policy, loss_value)
-
-        return loss
+        return loss_policy, loss_value

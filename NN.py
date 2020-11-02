@@ -5,8 +5,6 @@ import math
 from torch.nn.parameter import Parameter
 from torch.nn.modules.module import Module
 import torch.nn.functional as F
-from torch_geometric.nn import MessagePassing
-from torch_geometric.utils import add_self_loops, degree
 from utils import *
 
 class denseNet(Module):
@@ -35,165 +33,207 @@ class denseNet(Module):
         else:
             return output
 
-    def __repr__(self):
-        return self.__class__.__name__ + ' (' \
-               + str(self.in_features) + ' -> ' \
-               + str(self.out_features) + ')'
+class GraphConv(nn.Module):
+    '''
+    Graph Convolution Layer according to (T. Kipf and M. Welling, ICLR 2017) if K<=1
+    Chebyshev Graph Convolution Layer according to (M. Defferrard, X. Bresson, and P. Vandergheynst, NIPS 2017) if K>1
+    Additional tricks (power of adjacency matrix and weighted self connections) as in the Graph U-Net paper
+    '''
 
-class GCNConv(MessagePassing):
-    def __init__(self, in_channels, out_channels):
-        super(GCNConv, self).__init__(aggr='add')  # "Add" aggregation
-        self.lin = torch.nn.Linear(in_channels, out_channels)
+    def __init__(self, in_features, out_features, activation=None, bnorm=False):
+        super(GraphConv, self).__init__()
+        self.fc = nn.Linear(in_features=in_features, out_features=out_features)
+        self.activation = activation
+        self.bnorm = bnorm
+        if self.bnorm:
+            self.bn = nn.BatchNorm1d(out_features)
 
-    def forward(self, x, edge_index):
-        # Step 1: Add self-loops
-        edge_index, _ = add_self_loops(edge_index, num_nodes=x.size(0))
+    def forward(self, x):
+        # print('in', x.shape, torch.sum(torch.abs(torch.sum(x, 2)) > 0))
+        # if len(x[0].shape)==3:
+        #     print("mamoooo", x[0].shape, x[1].shape)
+        laplacian = x[1]
+        if len(x[0].shape) == 2:
+            x_hat = torch.matmul(laplacian, x[0])
+        else:
+            x_hat = torch.bmm(laplacian, x[0])
 
-        # Step 2: Multiply with weights
-        x = self.lin(x)
+        x = self.fc(x_hat)
 
-        # Step 3: Calculate the normalization
-        row, col = edge_index
-        deg = degree(row, x.size(0), dtype=x.dtype)
-        deg_inv_sqrt = deg.pow(-0.5)
-        norm = deg_inv_sqrt[row] * deg_inv_sqrt[col]
+        if self.bnorm:
+            if len(x.shape) == 3:
+                x = self.bn(x.permute(0, 2, 1)).permute(0, 2, 1)
+            else:
+                x = self.bn(x)
+        if self.activation is not None:
+            x = self.activation(x)
+        return [x,laplacian]
 
-        # Step 4: Propagate the embeddings to the next layer
-        return self.propagate(edge_index, size=(x.size(0), x.size(0)), x=x, norm=norm)
+class GCNGame(nn.Module):
+    '''
+    Baseline Graph Convolutional Network with a stack of Graph Convolution Layers and global pooling over nodes.
+    '''
 
-    def message(self, x_j, norm):
-        # Normalize node features.
-        return norm.view(-1, 1) * x_j
+    def __init__(self, in_features, out_features, adj, filters=[128, 128], bnorm=True, n_hidden=32, dropout=0.2, noGCN = False, debugging = False):
+        super(GCNGame, self).__init__()
 
-class GCNBoard(nn.Module):
-    def __init__(self, nfeat, nhid, nresourcees, dropout):
-        super(GCNBoard, self).__init__()
+        # Graph convolution layers
+        self.gconv = nn.Sequential(*([GraphConv(in_features=in_features if layer == 0 else filters[layer - 1],
+                                                out_features=f,
+                                                activation=nn.ReLU(inplace=True),
+                                                # activation=nn.Tanh(),
+                                                bnorm=bnorm) for layer, f in enumerate(filters)]))
+        if noGCN:
+            self.laplacian = torch.eye(adj.shape[0])
+        else:
+            self.laplacian = self.laplacian_batch(adj)
+        self.t_laplacian = self.laplacian
 
-        self.gc1 = GCNConv(nfeat, nhid)
-        self.gc2 = GCNConv(nhid, nhid)
-        self.cPolicy = denseNet(nhid, nresourcees+1)
-        self.cQ = denseNet(nhid, 1)
-        self.dropout = dropout
+        self.debugging = debugging
 
-    def forward(self, x, feat, edge_index, is_training):
-        '''
-        experiment with dropout
-        '''
+        # Fully connected layers
+        fcPolicy = []
+        fcQ = []
+        if dropout > 0:
+            fcPolicy.append(nn.Dropout(p=dropout))
+            fcQ.append(nn.Dropout(p=dropout))
+        if n_hidden > 0:
+            fcPolicy.append(nn.Linear(filters[-1], n_hidden))
+            fcPolicy.append(nn.ReLU(inplace=True))
+            fcQ.append(nn.Linear(filters[-1], n_hidden))
+            fcQ.append(nn.ReLU(inplace=True))
+            if dropout > 0:
+                fcPolicy.append(nn.Dropout(p=dropout))
+                fcQ.append(nn.Dropout(p=dropout))
+            n_last = n_hidden
+        else:
+            n_last = filters[-1]
+        fcPolicy.append(nn.Linear(n_last, out_features))
+        fcQ.append(nn.Linear(n_last, 1))
+        self.fcPolicy = nn.Sequential(*fcPolicy)
+        self.fcQ = nn.Sequential(*fcQ)
+
+    def laplacian_batch(self, A):
+        A = torch.FloatTensor(A)
+        N = A.shape[0]
+        A_hat = A
+        I = torch.eye(N)
+        I = 2 * I
+        A_hat = A + I
+        D_hat = (torch.sum(A_hat, 1) + 1e-5) ** (-0.5)
+        L = D_hat * A_hat * D_hat
+        return L
+
+    def forward(self, x, feat):
+
+        if len(x.shape)==3:
+            self.t_laplacian = [self.laplacian.unsqueeze(dim=0)]*x.shape[0]
+            self.t_laplacian = torch.cat(self.t_laplacian)
+        else:
+            self.t_laplacian = self.laplacian
+
         x = torch.cat((x, feat), dim=-1)
+        x = self.gconv([x, self.t_laplacian])[0]
+        # x = torch.mean(x, dim=-2)  # max pooling over nodes (usually performs better than average)
+        if self.debugging:
+            print("...", x)
+        x = torch.max(x, dim=-2)[0]  # max pooling over nodes (usually performs better than average)
+        if self.debugging:
+            print(x)
+        Policy = self.fcPolicy(x)
+        # if self.debugging:
+        #     print(F.softmax(Policy, dim=0))
+        Q = self.fcQ(x)
+        return Policy, F.softmax(Policy, dim=0), Q
 
-        x = F.relu(self.gc1(x, edge_index))
-        x = F.dropout(x, self.dropout, training = is_training)
+    def step(self, x, feat):
 
-        x = F.relu(self.gc2(x, edge_index))
-        x = F.dropout(x, self.dropout, training = is_training)
-
-        x = torch.max(x, dim = len(x.shape)-2)
-
-        finx = self.cPolicy(x)
-        finy = self.cQ(x)
-
-        return finx, F.softmax(finx, dim=0), finy
-
-    def step(self, x, feat, edge_index):
         x = torch.FloatTensor(x)
         feat = torch.FloatTensor(feat)
-        edge_index = torch.FloatTensor(edge_index)
 
-        _, pi, v = self.forward(x, feat, edge_index)
+        _, pi, v = self.forward(x, feat)
         return pi, v[0]
 
-class GCNNode(nn.Module):
+class GCNScore(nn.Module):
+    '''
+    Baseline Graph Convolutional Network with a stack of Graph Convolution Layers and global pooling over nodes.
+    '''
 
-    def __init__(self, nfeat, nhid, ndegree, dropout, nidx):
-        super(GCNNode, self).__init__()
+    def __init__(self, in_features, out_features, adj, filters=[64, 64], bnorm=False, n_hidden=0, dropout=0.2):
+        super(GCNScore, self).__init__()
 
-        self.gc1 = GCNConv(nfeat, nhid)
-        self.gc2 = GCNConv(nhid, nhid)
-        self.cPolicy = denseNet(nhid, ndegree)
-        self.cQ = denseNet(nhid, 1)
-        self.dropout = dropout
+        # Graph convolution layers
+        self.gconv = nn.Sequential(*([GraphConv(in_features=in_features if layer == 0 else filters[layer - 1],
+                                                out_features=f,
+                                                activation=nn.ReLU(inplace=True),
+                                                bnorm=bnorm) for layer, f in enumerate(filters)]))
+        self.laplacian = self.laplacian_batch(adj)
 
-    def forward(self, x, feat, edge_index):
-        '''
-        experiment with dropout
-        '''
+        # Fully connected layers
+        fc = []
+        if dropout > 0:
+            fc.append(nn.Dropout(p=dropout))
+        if n_hidden > 0:
+            fc.append(nn.Linear(filters[-1], n_hidden))
+            fc.append(nn.ReLU(inplace=True))
+            if dropout > 0:
+                fc.append(nn.Dropout(p=dropout))
+            n_last = n_hidden
+        else:
+            n_last = filters[-1]
+        fc.append(nn.Linear(n_last, out_features))
+        self.fc = nn.Sequential(*fc)
 
+    def laplacian_batch(self, A):
+        A = torch.FloatTensor(A)
+        N = A.shape[0]
+        A_hat = A
+        I = torch.eye(N)
+        I = 2 * I
+        A_hat = A + I
+        D_hat = (torch.sum(A_hat, 1) + 1e-5) ** (-0.5)
+        L = D_hat * A_hat * D_hat
+        return L
+
+    def forward(self, x, feat):
         x = torch.cat((x, feat), dim=-1)
+        x = self.gconv([x, self.laplacian])[0]
+        x = torch.mean(x, dim=-2)  # max pooling over nodes (usually performs better than average)
+        x = self.fc(x)
+        return x
 
-        x = F.relu(self.gc1(x, edge_index))
-        x = F.dropout(x, self.dropout, training = is_training)
-
-        x = F.relu(self.gc2(x, edge_index))
-        x = F.dropout(x, self.dropout, training = is_training)
-
-        x = torch.max(x, dim = len(x.shape)-2)
-
-        finx = self.cPolicy(x)
-        finy = self.cQ(x)
-
-        return finx, F.softmax(finx, dim=0), finy
-
-    def step(self, x, feat, edge_index):
-
+    def step(self, x, feat):
         x = torch.FloatTensor(x)
         feat = torch.FloatTensor(feat)
-        edge_index = torch.LongTensor(edge_index)
 
-        _, pi, v = self.forward(x, feat, edge_index)
-        #pi, v = pi.detach().numpy().flatten(), v.detach().numpy()
-        #return pi.detach().numpy().flatten(), v.detach().numpy()[0]
-        return pi, v[0]
+        score = self.forward(x, feat)
+        return score
 
 class RepresentationFunc(nn.Module):
-    def __init__(self, nin, nhid, nout):
+    def __init__(self, in_features, out_features, adj, filters=[32,3], bnorm=False, n_hidden=0, dropout=0.2):
         super(RepresentationFunc, self).__init__()
 
-        self.gc1 = GCNConv(nin, nhid)
-        self.gc2 = GCNConv(nhid, nout)
+        self.gconv = nn.Sequential(*([GraphConv(in_features=in_features if layer == 0 else filters[layer - 1],
+                                                out_features=f,
+                                                activation=nn.ReLU(inplace=True),
+                                                bnorm=bnorm) for layer, f in enumerate(filters)]))
+        self.laplacian = self.laplacian_batch(adj)
 
-    def forward(self, x, edge_index):
-        x = torch.tanh(self.gc1(x, edge_index))
-        x = torch.tanh(self.gc2(x,edge_index))
+    def laplacian_batch(self, A):
+        A = torch.FloatTensor(A)
+        N = A.shape[0]
+        A_hat = A
+        I = torch.eye(N)
+        I = 2 * I
+        A_hat = A + I
+        D_hat = (torch.sum(A_hat, 1) + 1e-5) ** (-0.5)
+        L = D_hat * A_hat * D_hat
+        return L
+
+    def forward(self, x):
+        x = self.gconv([x, self.laplacian])[0]
         return x
 
-    def step(self, x, edge_index):
+    def step(self, x):
         x = torch.FloatTensor(x)
-        edge_index = torch.LongTensor(edge_index)
-        return self.forward(x, edge_index)
-
-class ScorePredictionFunc(nn.Module):
-    def __init__(self, nfeat, nhid, nhid2, dropout):
-        super(ScorePredictionFunc, self).__init__()
-
-        self.gc1 = GCNConv(nfeat, nhid)
-        self.gc2 = GCNConv(nhid, nhid)
-        self.c1 = denseNet(nhid, nhid2)
-        self.c2 = denseNet(nhid2, 1)
-        self.dropout = dropout
-
-    def forward(self, x, feat, edge_index):
-        '''
-        experiment with dropout
-        '''
-        x = torch.cat((x, feat), dim=-1)
-
-        x = F.relu(self.gc1(x, edge_index))
-        x = F.dropout(x, self.dropout, training = is_training)
-
-        x = F.relu(self.gc2(x, edge_index))
-        x = F.dropout(x, self.dropout, training = is_training)
-
-        x = torch.max(x, dim = len(x.shape)-2)
-
-        x = torch.tanh(self.c1(x))
-        x = self.c2(x)
-
-        return x
-
-    def step(self, x, feat, edge_index):
-
-        x = torch.FloatTensor(x)
-        feat = torch.FloatTensor(feat)
-        edge_index = torch.LongTensor(edge_index)
-
-        return self.forward(x, feat, edge_index)
+        return self.forward(x)
