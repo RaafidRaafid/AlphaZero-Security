@@ -468,13 +468,17 @@ class MCTS:
 
         # print(self.root.state, self.root.type, self.root.n_actions)
         if self.root.type == 'board':
+            np.set_printoptions(precision=3)
+            np.set_printoptions(suppress=True)
             print("probabilities ", abs(self.root.original_prior - self.root.visits_as_probs()), self.root.visits_as_probs(), self.root.original_prior)
             # print("Q values ", self.root.child_W, self.root.child_N+1, self.root.child_W/(self.root.child_N+1))
 
             # else:
             #     print("edge checker ", self.root.n_actions, self.root.bad)
 
-        if self.root.depth > self.temp_threshold:
+        if self.root.depth >= self.temp_threshold:
+            if self.root.type == 'board':
+                self.root.bad[0]=0.0
             action_idx = np.argmax(self.root.bad*self.root.child_N)
             #print(self.root.bad, self.root.child_N, action_idx)
             return action_idx

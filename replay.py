@@ -9,7 +9,7 @@ class ReplayMemory:
     reached.
     """
 
-    def __init__(self, size, column_shapes, batch_size=10):
+    def __init__(self, size, column_shapes, batch_size=1):
         """
         :param size: Number of experience tuples to be stored in the replay
         memory.
@@ -59,7 +59,7 @@ class ReplayMemory:
         column.
         """
         # assert len(actions) == len(rewards) == len(obs) == len(values)
-        
+
         num = len(list(rows.values())[0])
         if num==0:
             return
@@ -88,7 +88,9 @@ class ReplayMemory:
         Returns a batch of experience tuples for training.
         :return: Dictionary containing a numpy array for each column.
         """
+
         indices = np.random.choice(self.count, min(self.batch_size, self.count))
+        # indices = np.random.choice(self.count, min(minibatch_size, self.count))
         minibatch = {}
         for column_name in self.columns.keys():
             minibatch[column_name] = self.columns[column_name][indices]

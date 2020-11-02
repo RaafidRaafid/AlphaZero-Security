@@ -75,11 +75,12 @@ class GCNBoard(nn.Module):
         self.cQ = denseNet(nhid, 1)
         self.dropout = dropout
 
-    def forward(self, x, feat, edge_index, is_training):
+    def forward(self, x, feat, edge_index, is_training = True):
         '''
         experiment with dropout
         '''
         x = torch.cat((x, feat), dim=-1)
+        x = x.squeeze()
 
         x = F.relu(self.gc1(x, edge_index))
         x = F.dropout(x, self.dropout, training = is_training)
@@ -87,24 +88,24 @@ class GCNBoard(nn.Module):
         x = F.relu(self.gc2(x, edge_index))
         x = F.dropout(x, self.dropout, training = is_training)
 
-        x = torch.max(x, dim = len(x.shape)-2)
+        x = torch.max(x, dim = len(x.shape)-2)[0]
 
         finx = self.cPolicy(x)
         finy = self.cQ(x)
 
         return finx, F.softmax(finx, dim=0), finy
 
-    def step(self, x, feat, edge_index):
+    def step(self, x, feat, edge_index, is_training = True):
         x = torch.FloatTensor(x)
         feat = torch.FloatTensor(feat)
-        edge_index = torch.FloatTensor(edge_index)
+        edge_index = torch.LongTensor(edge_index)
 
-        _, pi, v = self.forward(x, feat, edge_index)
+        _, pi, v = self.forward(x, feat, edge_index, is_training)
         return pi, v[0]
 
 class GCNNode(nn.Module):
 
-    def __init__(self, nfeat, nhid, ndegree, dropout, nidx):
+    def __init__(self, nfeat, nhid, ndegree, dropout):
         super(GCNNode, self).__init__()
 
         self.gc1 = GCNConv(nfeat, nhid)
@@ -113,12 +114,13 @@ class GCNNode(nn.Module):
         self.cQ = denseNet(nhid, 1)
         self.dropout = dropout
 
-    def forward(self, x, feat, edge_index):
+    def forward(self, x, feat, edge_index, is_training = True):
         '''
         experiment with dropout
         '''
 
         x = torch.cat((x, feat), dim=-1)
+        x = x.squeeze()
 
         x = F.relu(self.gc1(x, edge_index))
         x = F.dropout(x, self.dropout, training = is_training)
@@ -126,20 +128,20 @@ class GCNNode(nn.Module):
         x = F.relu(self.gc2(x, edge_index))
         x = F.dropout(x, self.dropout, training = is_training)
 
-        x = torch.max(x, dim = len(x.shape)-2)
+        x = torch.max(x, dim = len(x.shape)-2)[0]
 
         finx = self.cPolicy(x)
         finy = self.cQ(x)
 
         return finx, F.softmax(finx, dim=0), finy
 
-    def step(self, x, feat, edge_index):
+    def step(self, x, feat, edge_index, is_training = True):
 
         x = torch.FloatTensor(x)
         feat = torch.FloatTensor(feat)
         edge_index = torch.LongTensor(edge_index)
 
-        _, pi, v = self.forward(x, feat, edge_index)
+        _, pi, v = self.forward(x, feat, edge_index, is_training)
         #pi, v = pi.detach().numpy().flatten(), v.detach().numpy()
         #return pi.detach().numpy().flatten(), v.detach().numpy()[0]
         return pi, v[0]
@@ -171,11 +173,12 @@ class ScorePredictionFunc(nn.Module):
         self.c2 = denseNet(nhid2, 1)
         self.dropout = dropout
 
-    def forward(self, x, feat, edge_index):
+    def forward(self, x, feat, edge_index, is_training = True):
         '''
         experiment with dropout
         '''
         x = torch.cat((x, feat), dim=-1)
+        x = x.squeeze()
 
         x = F.relu(self.gc1(x, edge_index))
         x = F.dropout(x, self.dropout, training = is_training)
@@ -183,17 +186,17 @@ class ScorePredictionFunc(nn.Module):
         x = F.relu(self.gc2(x, edge_index))
         x = F.dropout(x, self.dropout, training = is_training)
 
-        x = torch.max(x, dim = len(x.shape)-2)
+        x = torch.max(x, dim = len(x.shape)-2)[0]
 
         x = torch.tanh(self.c1(x))
         x = self.c2(x)
 
         return x
 
-    def step(self, x, feat, edge_index):
+    def step(self, x, feat, edge_index, is_training = True):
 
         x = torch.FloatTensor(x)
         feat = torch.FloatTensor(feat)
         edge_index = torch.LongTensor(edge_index)
 
-        return self.forward(x, feat, edge_index)
+        return self.forward(x, feat, edge_index, is_training)

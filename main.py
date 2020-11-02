@@ -35,11 +35,11 @@ if __name__ == '__main__':
     env = gameEnv(0)
     representation = Representation(lambda: RepresentationFunc(4,8,3))
 
-    trainer_board = Trainer(lambda: GCNBoard(env.n_resources+3, 16, env.n_resources, 0.2), representation, env, 'board')
+    trainer_board = Trainer(lambda: GCNBoard(env.n_resources+3, 16, env.n_resources, 0.3), representation, env, 'board')
     trainer_node = []
     for i in range(env.n_nodes):
-        trainer_node.append(Trainer(lambda: GCNNode(env.n_resources+3, 16, env.degree[i], 0.2, 'node'+str(i)), representation, env, 'node'))
-    trainer_score = ScorePredictionTrainer(lambda: ScorePredictionFunc(env.n_resources+4, 10, 10, 0.2), representation, env)
+        trainer_node.append(Trainer(lambda: GCNNode(env.n_resources+3, 16, env.degree[i], 0.3), representation, env, 'node'))
+    trainer_score = ScorePredictionTrainer(lambda: ScorePredictionFunc(env.n_resources+4, 10, 10, 0.3), representation, env)
 
     # trainer_board = Trainer(lambda: GCNBoard(4, 16, env.n_resources, env.n_nodes, 0.2), representation, env, 'board')
     # trainer_node = []
@@ -48,7 +48,7 @@ if __name__ == '__main__':
     # trainer_score = ScorePredictionTrainer(lambda: ScorePredictionFunc(5, 10, 10, env.n_nodes, 0.2), representation, env)
 
 
-    mem_scores = ReplayMemory(500, {"sts" : [env.n_nodes, env.n_resources], "features" : [env.features.shape[0], env.features.shape[1]], "scores" : []}, batch_size = 20)
+    mem_scores = ReplayMemory(500, {"sts" : [env.n_nodes, env.n_resources], "features" : [env.features.shape[0], env.features.shape[1]], "scores" : []})
     mem_board = ReplayMemory(100, {"sts" : [env.n_nodes, env.n_resources], "features" : [env.features.shape[0], env.features.shape[1]], "pi" : [env.n_resources+1], "return" : []})
     mem_node = []
     for i in range(env.n_nodes):
@@ -137,7 +137,7 @@ if __name__ == '__main__':
         for i in range(env.n_nodes):
             mem_node[i].add_all({"sts" : sts_node[i],"features": [env.features]*len(sts_node[i]), "pi" : searches_pi_node[i], "return" : ret_node[i]})
 
-        if mem_board.count >= 4:
+        if mem_board.count >= 16:
             trainer_board.learning_rate = 0.1/float(lr)
             # print("bt",mem_board.count)
             batch_board = mem_board.get_minibatch()
@@ -147,7 +147,7 @@ if __name__ == '__main__':
 
         for i in range(env.n_nodes):
             # print("nd",i, mem_node[i].count)
-            if mem_node[i].count >= 2:
+            if mem_node[i].count >= 8:
                 trainer_node[i].learning_rate = 0.2/float(lr)
                 batch_node = mem_node[i].get_minibatch()
                 loss = trainer_node[i].train(batch_node["sts"], batch_node["features"], batch_node["pi"], batch_node["return"])

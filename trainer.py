@@ -76,7 +76,7 @@ class ScorePredictionTrainer:
 
 class Trainer:
 
-    def __init__(self, Policy, representation, env, type, learning_rate=0.02 ):
+    def __init__(self, Policy, representation, env, type, learning_rate=0.01):
 
         self.step_model = Policy()
         self.representation = representation
@@ -85,7 +85,7 @@ class Trainer:
         self.learning_rate = learning_rate
 
         self.value_criterion = nn.MSELoss()
-        self.optimizer = torch.optim.Adam(self.step_model.parameters(),lr=self.learning_rate)
+        self.optimizer = torch.optim.SGD(self.step_model.parameters(),lr=self.learning_rate)
 
     def getBack(self, var_grad_fn):
         # print(var_grad_fn)
@@ -155,19 +155,22 @@ class Trainer:
 
         #print(search_pis, logsoftmax(logits), -search_pis*logsoftmax(logits))
         #print(search_pis, logits, search_pis-logits, logsoftmax(logits), -search_pis*logsoftmax(logits), torch.sum(-search_pis*logsoftmax(logits), dim=1))
-        loss_policy = torch.mean(torch.sum(-search_pis*logsoftmax(logits), dim=1))
+        # loss_policy = torch.mean(torch.sum(-search_pis*logsoftmax(logits), dim=1))
+        loss_policy = torch.sum(-search_pis*logsoftmax(logits.view(1,-1)))
         #loss_policy = torch.mean(torch.sum(-logits*logsoftmax(search_pis), dim=1))
-        loss_value = self.value_criterion(z, returns.view(returns.size()[0],1))
+        # loss_value = self.value_criterion(z, returns.view(returns.size()[0],1))
+        loss_value = self.value_criterion(z, returns)
+
 
         # print(abs(z-returns.view(returns.size()[0],1)))
 
         #print(loss_policy, loss_value)
-        loss = 0.5*loss_policy + loss_value
+        loss = loss_policy + loss_value
         loss.backward()
         self.optimizer.step()
 
         # self.getBack(loss.grad_fn)
 
-        # print("-------------------------------------------------------- ", 0.5*loss_policy, loss_value)
+        print("-------------------------------------------------------- ", 0.5*loss_policy, loss_value)
 
         return loss
