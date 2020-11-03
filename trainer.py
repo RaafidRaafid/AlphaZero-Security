@@ -75,7 +75,7 @@ class ScorePredictionTrainer:
 
 class Trainer:
 
-    def __init__(self, Policy, representation, env, type, learning_rate=0.005):
+    def __init__(self, Policy, representation, env, type, learning_rate=0.01):
 
         self.step_model = Policy()
         self.representation = representation

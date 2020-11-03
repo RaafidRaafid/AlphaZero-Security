@@ -74,14 +74,14 @@ class GCNGame(nn.Module):
     Baseline Graph Convolutional Network with a stack of Graph Convolution Layers and global pooling over nodes.
     '''
 
-    def __init__(self, in_features, out_features, adj, filters=[128, 128], bnorm=True, n_hidden=32, dropout=0.2, noGCN = False, debugging = False):
+    def __init__(self, in_features, out_features, adj, filters=[128, 128, 128], bnorm=True, n_hidden=32, dropout=0.2, noGCN = False, debugging = False):
         super(GCNGame, self).__init__()
 
         # Graph convolution layers
         self.gconv = nn.Sequential(*([GraphConv(in_features=in_features if layer == 0 else filters[layer - 1],
                                                 out_features=f,
-                                                activation=nn.ReLU(inplace=True),
-                                                # activation=nn.Tanh(),
+                                                # activation=nn.ReLU(inplace=True),
+                                                activation=nn.Tanh(),
                                                 bnorm=bnorm) for layer, f in enumerate(filters)]))
         if noGCN:
             self.laplacian = torch.eye(adj.shape[0])

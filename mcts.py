@@ -12,7 +12,6 @@ D_NOISE_ALPHA = 0.03
 # Number of steps into the episode after which we always select the
 # action with highest action probability rather than selecting randomly
 TEMP_THRESHOLD = 0
-STOP_CUTTER = 0.0
 mode = 'train'
 
 
@@ -266,11 +265,6 @@ class MCTSNode:
         # practice (following the MiniGo implementation).
         #self.child_W = np.ones([len(self.n_actions)], dtype=np.float32) * value
 
-        if self.type == 'board':
-            for i in range(3):
-                self.child_prior[i+1] += (self.child_prior[0]*(1-STOP_CUTTER))/3
-            self.child_prior[0] = self.child_prior[0]*STOP_CUTTER
-
         self.backup_value(value, up_to=up_to)
 
     def backup_value(self, value, up_to):
@@ -283,7 +277,6 @@ class MCTSNode:
         if self.parent is None or self is up_to:
             return
         self.parent.backup_value(value, up_to)
-        # self.parent.backup_value(value*(0.9 + STOP_CUTTER/10.0), up_to)
         # self.parent.backup_value(value*1.003, up_to)
         # self.parent.backup_value(value*0.997, up_to)
 
@@ -296,11 +289,6 @@ class MCTSNode:
     def inject_noise(self):
         dirch = np.random.dirichlet([D_NOISE_ALPHA] * len(self.n_actions))
         self.child_prior = self.child_prior * 0.75 + dirch * 0.25
-
-        if self.type == 'board':
-            for i in range(3):
-                self.child_prior[i+1] += (self.child_prior[0]*(1-STOP_CUTTER))/3
-            self.child_prior[0] = self.child_prior[0]*STOP_CUTTER
 
     def visits_as_probs(self, squash=False):
         """
@@ -335,7 +323,7 @@ class MCTS:
     the tree search.
     """
 
-    def __init__(self, board_netw, node_netw, score_netw, representation, TreeEnv, seconds_per_move=None,
+    def __init__(self, board_netw, node_netw, score_netw, representation, TreeEnv, stopper_control = False, seconds_per_move=None,
                  simulations_per_move=800, num_parallel=1):
         """
         :param agent_netw: Network for predicting action probabilities and
@@ -357,6 +345,7 @@ class MCTS:
         self.simulations_per_move = simulations_per_move
         self.num_parallel = num_parallel
         self.temp_threshold = None        # Overwritten in initialize_search
+        self.stopper_control = stopper_control
 
         self.root = None
         MCTSNode.map.clear()
@@ -487,11 +476,11 @@ class MCTS:
         #     # print("Q values ", self.root.visits_as_probs(), self.root.child_W/(self.root.child_N+1))
 
         if self.root.depth >= self.temp_threshold:
-            # if self.root.type == 'board':
-            #     np.set_printoptions(precision=3)
-            #     self.root.bad[0] = 0.0
-            #     self.root.child_N[0] = 0.0
-            #     # print(int(self.TreeEnv.get_return_real(self.root.state)), self.root.child_N.astype(int), self.root.original_prior)
+            if self.root.type == 'board' and self.stopper_control:
+                np.set_printoptions(precision=3)
+                self.root.bad[0] = 0.0
+                # self.root.child_N[0] = 0.0
+                # print(int(self.TreeEnv.get_return_real(self.root.state)), self.root.child_N.astype(int), self.root.original_prior)
             action_idx = np.argmax(self.root.bad*self.root.child_N)
             return action_idx
         else:
@@ -550,14 +539,12 @@ class MCTS:
         #del self.root.parent.children
 
 
-def execute_episode(board_netw, node_netw, score_netw, representation, num_simulations, TreeEnv, curr_mode, stop_cutter):
+def execute_episode(board_netw, node_netw, score_netw, representation, num_simulations, TreeEnv, curr_mode, stopper_control = False):
 
-    global STOP_CUTTER
-    STOP_CUTTER = stop_cutter
     global mode
     mode = curr_mode
 
-    mcts = MCTS(board_netw, node_netw, score_netw, representation, TreeEnv)
+    mcts = MCTS(board_netw, node_netw, score_netw, representation, TreeEnv, stopper_control)
 
     mcts.initialize_search()
 

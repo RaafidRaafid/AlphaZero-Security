@@ -126,12 +126,15 @@ if __name__ == '__main__':
         # if (i+1)%10==0:
         #     lr = lr + 1.0
         scenario = random.randint(0, 9)
-        scenario = 0
+        # scenario = 0
         print("\n\nayayayaya -----", i, scenario)
         env = gameEnv(scenario, randomizoo = False)
         gauu[scenario] += 1.0
 
-        sts_board, searches_pi_board, ret_board, sts_node, searches_pi_node, ret_node, score_sts, scores = execute_episode(trainer_board, trainer_node, trainer_score, representation, 1500, env, 'train', 1.0)
+        if i<50:
+            sts_board, searches_pi_board, ret_board, sts_node, searches_pi_node, ret_node, score_sts, scores = execute_episode(trainer_board, trainer_node, trainer_score, representation, 1500, env, 'train', True)
+        else:
+            sts_board, searches_pi_board, ret_board, sts_node, searches_pi_node, ret_node, score_sts, scores = execute_episode(trainer_board, trainer_node, trainer_score, representation, 1500, env, 'train', False)
 
         # for i in range(len(sts_board)):
         #     wow = reverse_input(sts_board[i])
@@ -149,8 +152,8 @@ if __name__ == '__main__':
         for k in range(env.n_nodes):
             mem_node[k].add_all({"sts" : sts_node[k],"features": [env.features]*len(sts_node[k]), "pi" : searches_pi_node[k], "return" : ret_node[k]})
 
-        if (i+1)%10 == 0:
-            for j in range(5):
+        if (i+1)%1 == 0:
+            for j in range(1):
                 if mem_board.count >= 16:
                     # trainer_board.learning_rate = 0.1/float(lr)
                     # print("bt",mem_board.count)
