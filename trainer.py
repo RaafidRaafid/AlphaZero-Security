@@ -53,7 +53,8 @@ class ScorePredictionTrainer:
         states = torch.stack(sts)
         scores = torch.FloatTensor(scores)
 
-        outputs = self.step_model(states, feat_mat, edge_index)
+        intermidiate_feat_mat = self.representation.step_model(states, feat_mat, edge_index)
+        outputs = self.step_model(intermidiate_feat_mat)
 
         loss = self.value_criterion(scores.view(scores.size()[0],1), outputs)
         # loss = self.value_criterion(scores, outputs.view(-1))
@@ -76,7 +77,7 @@ class ScorePredictionTrainer:
 
 class Trainer:
 
-    def __init__(self, Policy, representation, env, type, learning_rate=0.01):
+    def __init__(self, Policy, representation, env, type, learning_rate=0.1):
 
         self.step_model = Policy()
         self.representation = representation
@@ -121,7 +122,7 @@ class Trainer:
 
         feat_mat = []
         for feat in feats:
-            feat_mat.append(self.representation.step_model(torch.FloatTensor(feat), edge_index))
+            feat_mat.append(torch.FloatTensor(feat))
         feat_mat = torch.stack(feat_mat)
 
         value = []
@@ -140,8 +141,10 @@ class Trainer:
             sts.append(state)
 
         states = torch.stack(sts)
-
-        logits, y, z = self.step_model(states, feat_mat, edge_index)
+        # print("age", torch.squeeze(torch.cat((states, feat_mat), dim=-1)))
+        intermidiate_feat_mat = self.representation.step_model(states, feat_mat, edge_index)
+        # print("pore", intermidiate_feat_mat)
+        logits, y, z = self.step_model(intermidiate_feat_mat)
         # for state in states:
         #     state = torch.FloatTensor(self.prep_input(state))
         #
@@ -171,6 +174,6 @@ class Trainer:
 
         # self.getBack(loss.grad_fn)
 
-        print("-------------------------------------------------------- ", 0.5*loss_policy, loss_value)
+        print("-------------------------------------------------------- ", loss_policy, loss_value)
 
         return loss

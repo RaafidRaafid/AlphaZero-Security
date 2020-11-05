@@ -364,7 +364,7 @@ class MCTS:
         self.score_states = []
         self.scores = []
 
-        self.feature_mat = self.representation.step_model.step(TreeEnv.features, self.TreeEnv.edge_index)
+        # self.feature_mat = self.representation.step_model.step(TreeEnv.features, self.TreeEnv.edge_index)
 
     def initialize_search(self, state=None):
         init_state = self.TreeEnv.initial_state()
@@ -390,7 +390,7 @@ class MCTS:
 
 
     def prep_input(self, state):
-        # return np.array(state).reshape(-1,1)
+        return np.array(state).reshape(-1,1)
 
         #one hot
         r = []
@@ -439,18 +439,22 @@ class MCTS:
                         self.scores.append(value)
                         self.score_map[self.hash(leaf.state)] = 1
                 else:
-                    value = self.score_netw.step_model.step(self.prep_input(leaf.state), self.TreeEnv.features, self.TreeEnv.edge_index)
+                    value = self.representation.step_model.step(self.prep_input(leaf.state), self.TreeEnv.features, self.TreeEnv.edge_index)
+                    value = self.score_netw.step_model.step(value)
+                    # value = self.score_netw.step_model.step(self.prep_input(leaf.state), self.TreeEnv.features, self.TreeEnv.edge_index)
 
                 leaf.backup_value(value, up_to=self.root)
                 continue
             if leaf.type == 'board':
                 # input prep
-                x, y = self.board_netw.step_model.step(self.prep_input(leaf.state), self.feature_mat, self.TreeEnv.edge_index)
+                intermidiate_feat_mat = self.representation.step_model.step(self.prep_input(leaf.state), self.TreeEnv.features, self.TreeEnv.edge_index)
+                x, y = self.board_netw.step_model.step(intermidiate_feat_mat)
                 x = x.data.numpy()
                 y = y.data.numpy()
             else:
+                intermidiate_feat_mat = self.representation.step_model.step(self.prep_input(leaf.state), self.TreeEnv.features, self.TreeEnv.edge_index)
                 idx = leaf.parent.idx_action[leaf.action]
-                x, y = self.node_netw[idx].step_model.step(self.prep_input(leaf.state),self.feature_mat, self.TreeEnv.edge_index)
+                x, y = self.node_netw[idx].step_model.step(intermidiate_feat_mat)
                 x = x.data.numpy()
                 y = y.data.numpy()
 
@@ -547,7 +551,8 @@ def execute_episode(board_netw, node_netw, score_netw, representation, num_simul
     # Must run this once at the start, so that noise injection actually affects
     # the first action of the episode.
     first_node = mcts.root.select_leaf()
-    probs, vals = board_netw.step_model.step(mcts.prep_input(first_node.state), mcts.feature_mat, TreeEnv.edge_index)
+    intermidiate_feat_mat = mcts.representation.step_model.step(mcts.prep_input(first_node.state), mcts.TreeEnv.features, mcts.TreeEnv.edge_index)
+    probs, vals = mcts.board_netw.step_model.step(intermidiate_feat_mat)
     probs = probs.data.numpy()
     vals = vals.data.numpy()
     first_node.incorporate_estimates(probs, vals, first_node)
@@ -574,7 +579,8 @@ def execute_episode(board_netw, node_netw, score_netw, representation, num_simul
 
         if mcts.root.is_done() or mcts.root.is_stopper:
             print("#summary ", sum(mcts.root.bad), mcts.root.depth, len(MCTSNode.map), MCTSNode.count)
-            print("score prediction: ", mcts.score_netw.step_model.step(mcts.prep_input(mcts.root.state), mcts.TreeEnv.features, mcts.TreeEnv.edge_index)*3)
+            intermidiate_feat_mat = mcts.representation.step_model.step(mcts.prep_input(mcts.root.state), mcts.TreeEnv.features, mcts.TreeEnv.edge_index)
+            print("score prediction: ", mcts.score_netw.step_model.step(intermidiate_feat_mat)*3)
             break
 
     # Computes the returns at each step from the list of rewards obtained at
@@ -583,32 +589,18 @@ def execute_episode(board_netw, node_netw, score_netw, representation, num_simul
     if mode == 'train':
         rew = TreeEnv.get_return_real(mcts.root.state)
     else:
-        rew = mcts.score_netw.step_model.step(mcts.prep_input(mcts.root.state), mcts.TreeEnv.features, mcts.TreeEnv.edge_index)
+        intermidiate_feat_mat = mcts.representation.step_model.step(self.prep_input(leaf.state), self.TreeEnv.features, self.TreeEnv.edge_index)
+        rew = mcts.score_netw.step_model.step(intermidiate_feat_mat)
 
     ret_board = []
     for sts in mcts.sts_board:
-        # if mode == 'train':
-        #     temp.append(rew - TreeEnv.get_return_real(sts))
-        # else:
-        #     temp.append(rew - mcts.score_netw.step_model.step(mcts.prep_input(sts), mcts.feature_mat, mcts.TreeEnv.edge_index))
-
         ret_board.append(rew)
-
-
-    # ret_node = []
-    # for i in range(TreeEnv.n_nodes):
-    #     ret_node.append([rew]*len(mcts.sts_node[i]))
 
 
     ret_node = []
     for i in range(TreeEnv.n_nodes):
         temp = []
         for sts in mcts.sts_node[i]:
-            # if mode == 'train':
-            #     temp.append(rew - TreeEnv.get_return_real(sts))
-            # else:
-            #     temp.append(rew - mcts.score_netw.step_model.step(mcts.prep_input(sts), mcts.feature_mat, mcts.TreeEnv.edge_index))
-
             temp.append(rew)
         ret_node.append(temp)
 

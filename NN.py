@@ -65,138 +65,96 @@ class GCNConv(MessagePassing):
         # Normalize node features.
         return norm.view(-1, 1) * x_j
 
-class GCNBoard(nn.Module):
-    def __init__(self, nfeat, nhid, nresourcees, dropout):
-        super(GCNBoard, self).__init__()
-
-        self.gc1 = GCNConv(nfeat, nhid)
-        self.gc2 = GCNConv(nhid, nhid)
-        self.cPolicy = denseNet(nhid, nresourcees+1)
-        self.cQ = denseNet(nhid, 1)
-        self.dropout = dropout
-
-    def forward(self, x, feat, edge_index, is_training = True):
-        '''
-        experiment with dropout
-        '''
-        x = torch.cat((x, feat), dim=-1)
-        x = x.squeeze()
-
-        x = F.relu(self.gc1(x, edge_index))
-        x = F.dropout(x, self.dropout, training = is_training)
-
-        x = F.relu(self.gc2(x, edge_index))
-        x = F.dropout(x, self.dropout, training = is_training)
-
-        x = torch.max(x, dim = len(x.shape)-2)[0]
-
-        finx = self.cPolicy(x)
-        finy = self.cQ(x)
-
-        return finx, F.softmax(finx, dim=0), finy
-
-    def step(self, x, feat, edge_index, is_training = True):
-        x = torch.FloatTensor(x)
-        feat = torch.FloatTensor(feat)
-        edge_index = torch.LongTensor(edge_index)
-
-        _, pi, v = self.forward(x, feat, edge_index, is_training)
-        return pi, v[0]
-
-class GCNNode(nn.Module):
-
-    def __init__(self, nfeat, nhid, ndegree, dropout):
-        super(GCNNode, self).__init__()
-
-        self.gc1 = GCNConv(nfeat, nhid)
-        self.gc2 = GCNConv(nhid, nhid)
-        self.cPolicy = denseNet(nhid, ndegree)
-        self.cQ = denseNet(nhid, 1)
-        self.dropout = dropout
-
-    def forward(self, x, feat, edge_index, is_training = True):
-        '''
-        experiment with dropout
-        '''
-
-        x = torch.cat((x, feat), dim=-1)
-        x = x.squeeze()
-
-        x = F.relu(self.gc1(x, edge_index))
-        x = F.dropout(x, self.dropout, training = is_training)
-
-        x = F.relu(self.gc2(x, edge_index))
-        x = F.dropout(x, self.dropout, training = is_training)
-
-        x = torch.max(x, dim = len(x.shape)-2)[0]
-
-        finx = self.cPolicy(x)
-        finy = self.cQ(x)
-
-        return finx, F.softmax(finx, dim=0), finy
-
-    def step(self, x, feat, edge_index, is_training = True):
-
-        x = torch.FloatTensor(x)
-        feat = torch.FloatTensor(feat)
-        edge_index = torch.LongTensor(edge_index)
-
-        _, pi, v = self.forward(x, feat, edge_index, is_training)
-        #pi, v = pi.detach().numpy().flatten(), v.detach().numpy()
-        #return pi.detach().numpy().flatten(), v.detach().numpy()[0]
-        return pi, v[0]
-
 class RepresentationFunc(nn.Module):
     def __init__(self, nin, nhid, nout):
         super(RepresentationFunc, self).__init__()
 
-        self.gc1 = GCNConv(nin, nhid)
-        self.gc2 = GCNConv(nhid, nout)
+        self.gc = []
+        for layer, f in enumerate(nhid):
+            self.gc.append(GCNConv(in_channels = nin if layer == 0 else nhid[layer-1], out_channels = f))
 
-    def forward(self, x, edge_index):
-        x = torch.tanh(self.gc1(x, edge_index))
-        x = torch.tanh(self.gc2(x,edge_index))
-        return x
+        self.fc = nn.Linear(nhid[-1], nout)
+        self.activation = nn.ReLU(inplace = True)
 
-    def step(self, x, edge_index):
-        x = torch.FloatTensor(x)
-        edge_index = torch.LongTensor(edge_index)
-        return self.forward(x, edge_index)
-
-class ScorePredictionFunc(nn.Module):
-    def __init__(self, nfeat, nhid, nhid2, dropout):
-        super(ScorePredictionFunc, self).__init__()
-
-        self.gc1 = GCNConv(nfeat, nhid)
-        self.gc2 = GCNConv(nhid, nhid)
-        self.c1 = denseNet(nhid, nhid2)
-        self.c2 = denseNet(nhid2, 1)
-        self.dropout = dropout
-
-    def forward(self, x, feat, edge_index, is_training = True):
-        '''
-        experiment with dropout
-        '''
+    def forward(self, x, feat, edge_index):
         x = torch.cat((x, feat), dim=-1)
-        x = x.squeeze()
+        x = torch.squeeze(x)
 
-        x = F.relu(self.gc1(x, edge_index))
-        x = F.dropout(x, self.dropout, training = is_training)
+        for i in range(len(self.gc)):
+            x = self.gc[i](x, edge_index)
+            x = self.activation(x)
 
-        x = F.relu(self.gc2(x, edge_index))
-        x = F.dropout(x, self.dropout, training = is_training)
+        x = self.fc(x)
+        return self.activation(x)
 
-        x = torch.max(x, dim = len(x.shape)-2)[0]
-
-        x = torch.tanh(self.c1(x))
-        x = self.c2(x)
-
-        return x
-
-    def step(self, x, feat, edge_index, is_training = True):
-
+    def step(self, x, feat, edge_index):
         x = torch.FloatTensor(x)
         feat = torch.FloatTensor(feat)
         edge_index = torch.LongTensor(edge_index)
+        return self.forward(x, feat, edge_index)
 
-        return self.forward(x, feat, edge_index, is_training)
+
+class PredictionNN(nn.Module):
+    def __init__(self, nfeat, nhid, nhid2, nout, dropout):
+        super(PredictionNN, self).__init__()
+
+        self.fc1 = nn.Linear(nfeat, nhid)
+        self.fc2 = nn.Linear(nhid, nhid2)
+        self.fc3_1 = nn.Linear(nhid2, nout)
+        self.fc3_2 = nn.Linear(nhid2, 1)
+        self.activation = nn.ReLU(inplace = True)
+        self.dropout = dropout
+
+    def forward(self, x, is_training = True):
+        '''
+        experiment with dropout
+        '''
+        x = self.fc1(x)
+        x = self.activation(x)
+
+        x = self.fc2(x)
+        x = self.activation(x)
+
+        x = torch.max(x, dim=-2)[0]
+
+        logits = self.fc3_1(x)
+        value = self.fc3_2(x)
+
+        return logits, F.softmax(logits, dim=0), value
+
+    def step(self, x, is_training = True):
+        x = torch.FloatTensor(x)
+
+        _, pi, v = self.forward(x, is_training)
+        return pi, v[0]
+
+class ScorePredictionNN(nn.Module):
+    def __init__(self, nfeat, nhid, nhid2, dropout):
+        super(ScorePredictionNN, self).__init__()
+
+        self.fc1 = nn.Linear(nfeat, nhid)
+        self.fc2 = nn.Linear(nhid, nhid2)
+        self.fc3 = nn.Linear(nhid2, 1)
+        self.activation = nn.ReLU(inplace = True)
+        self.dropout = dropout
+
+    def forward(self, x, is_training = True):
+        '''
+        experiment with dropout
+        '''
+        x = self.fc1(x)
+        x = self.activation(x)
+
+        x = self.fc2(x)
+        x = self.activation(x)
+
+        x = torch.max(x, dim=-2)[0]
+
+        value = self.fc3(x)
+
+        return value
+
+    def step(self, x, is_training = True):
+        x = torch.FloatTensor(x)
+
+        return self.forward(x, is_training)[0]
