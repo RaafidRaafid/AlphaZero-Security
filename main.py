@@ -33,15 +33,18 @@ if __name__ == '__main__':
         return inp
 
     env = gameEnv(0)
-    representation = Representation(lambda: RepresentationFunc(env.features.shape[1],3, env.adj))
+    nPass = 64
+    stsW = 1
 
-    trainer_board = Trainer(lambda: GCNGame(1+env.features.shape[1], env.n_resources+1, env.adj, debugging = False), representation, env, 'board')
+    representation = Representation(lambda: RepresentationFunc(env.features.shape[1] + stsW, nPass, env.adj))
+
+    trainer_board = Trainer(lambda: PredictionNN(nPass, env.n_resources + 1, dropout = 0.3, debugging = False), representation, env, 'board')
     trainer_node = []
     lin_node_net = []
     for i in range(env.n_nodes):
-        trainer_node.append(Trainer(lambda: GCNGame(1+env.features.shape[1], env.degree[i], env.adj, debugging = False), representation, env, 'node'))
+        trainer_node.append(Trainer(lambda: PredictionNN(nPass, env.degree[i], dropout = 0.3), representation, env, 'node'))
         # lin_node_net.append(Trainer(lambda: GCNGame(env.n_resources+3, env.degree[i], env.adj, noGCN=True), representation, env, 'node'))
-    trainer_score = ScorePredictionTrainer(lambda: GCNScore(1+env.features.shape[1], 1, env.adj), representation, env)
+    trainer_score = ScorePredictionTrainer(lambda: ScorePredictionNN(nPass, dropout = 0.3), representation, env)
 
 
     # trainer_board = Trainer(lambda: GCNBoard(4, 16, env.n_resources, env.n_nodes, 0.2), representation, env, 'board')
@@ -51,11 +54,11 @@ if __name__ == '__main__':
     # trainer_score = ScorePredictionTrainer(lambda: ScorePredictionFunc(5, 10, 10, env.n_nodes, 0.2), representation, env)
 
 
-    mem_scores = ReplayMemory(500, {"sts" : [env.n_nodes, 1], "features" : [env.features.shape[0], env.features.shape[1]], "scores" : []}, batch_size = 20)
-    mem_board = ReplayMemory(500, {"sts" : [env.n_nodes, 1], "features" : [env.features.shape[0], env.features.shape[1]], "pi" : [env.n_resources+1], "return" : []})
+    mem_scores = ReplayMemory(500, {"sts" : [env.n_nodes, stsW], "features" : [env.features.shape[0], env.features.shape[1]], "scores" : []})
+    mem_board = ReplayMemory(100, {"sts" : [env.n_nodes, stsW], "features" : [env.features.shape[0], env.features.shape[1]], "pi" : [env.n_resources+1], "return" : []})
     mem_node = []
     for i in range(env.n_nodes):
-        mem_node.append(ReplayMemory(500, {"sts" : [env.n_nodes, 1], "features" : [env.features.shape[0], env.features.shape[1]], "pi" : [env.degree[i]], "return" : []}))
+        mem_node.append(ReplayMemory(100, {"sts" : [env.n_nodes, stsW], "features" : [env.features.shape[0], env.features.shape[1]], "pi" : [env.degree[i]], "return" : []}))
 
     # mem_scores = ReplayMemory(500, {"sts" : [env.n_nodes, 1], "features" : [env.features.shape[0], env.features.shape[1]], "scores" : []}, batch_size = 10)
     # mem_board = ReplayMemory(100, {"sts" : [env.n_nodes, 1], "features" : [env.features.shape[0], env.features.shape[1]], "pi" : [env.n_resources+1], "return" : []})
@@ -122,7 +125,7 @@ if __name__ == '__main__':
     #         loss = trainer_score.train(batch_score["sts"], batch_score["features"], batch_score["scores"])
 
     gauu = [0.0]*(10)
-    for i in range(100):
+    for i in range(200):
         # if (i+1)%10==0:
         #     lr = lr + 1.0
         scenario = random.randint(0, 9)
@@ -147,6 +150,10 @@ if __name__ == '__main__':
 
         res1[scenario].append(len(sts_board))
         res2[scenario].append(np.sum(wow*env.out))
+
+        # sts_board = [sts_board[0]]
+        # searches_pi_board = [searches_pi_board[0]]
+        # ret_board = [ret_board[0]]
 
         mem_board.add_all({"sts" : sts_board,"features": [env.features]*len(sts_board),  "pi" : searches_pi_board, "return" : ret_board})
         for k in range(env.n_nodes):

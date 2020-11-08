@@ -52,7 +52,8 @@ class ScorePredictionTrainer:
         states = torch.stack(sts)
         scores = torch.FloatTensor(scores)
 
-        outputs = self.step_model(states, feat_mat)
+        intermidiate_feat_mat = self.representation.step_model(states, feat_mat)
+        outputs = self.step_model(intermidiate_feat_mat)
 
         loss = self.value_criterion(scores.view(scores.size()[0],1), outputs)
         # loss = self.value_criterion(scores, outputs.view(-1))
@@ -75,7 +76,7 @@ class ScorePredictionTrainer:
 
 class Trainer:
 
-    def __init__(self, Policy, representation, env, type, learning_rate=0.01):
+    def __init__(self, Policy, representation, env, type, learning_rate=0.05):
 
         self.step_model = Policy()
         self.representation = representation
@@ -84,7 +85,7 @@ class Trainer:
         self.learning_rate = learning_rate
 
         self.value_criterion = nn.MSELoss()
-        self.optimizer = torch.optim.Adam(self.step_model.parameters(),lr=self.learning_rate)
+        self.optimizer = torch.optim.SGD(self.step_model.parameters(),lr=self.learning_rate)
         self.dayum = []
 
     def getBack(self, var_grad_fn):
@@ -151,7 +152,9 @@ class Trainer:
 
         states = torch.stack(sts)
 
-        logits, y, z = self.step_model(states, feat_mat)
+        intermidiate_feat_mat = self.representation.step_model(states, feat_mat)
+        logits, y, z = self.step_model(intermidiate_feat_mat)
+
         logsoftmax = nn.LogSoftmax(dim=1)
         KLDiv = nn.KLDivLoss(reduction = 'batchmean')
 

@@ -57,8 +57,13 @@ class GraphConv(nn.Module):
             x_hat = torch.matmul(laplacian, x[0])
         else:
             x_hat = torch.bmm(laplacian, x[0])
+        idx = x[2]
 
+        # if idx==0:
+        #     print("age", x_hat)
         x = self.fc(x_hat)
+        # if idx==0:
+        #     print("pore", x)
 
         if self.bnorm:
             if len(x.shape) == 3:
@@ -67,27 +72,65 @@ class GraphConv(nn.Module):
                 x = self.bn(x)
         if self.activation is not None:
             x = self.activation(x)
-        return [x,laplacian]
+        return [x,laplacian,idx+1]
 
-class GCNGame(nn.Module):
-    '''
-    Baseline Graph Convolutional Network with a stack of Graph Convolution Layers and global pooling over nodes.
-    '''
+class RepresentationFunc(nn.Module):
+    def __init__(self, in_features, out_features, adj, filters=[128, 128], bnorm=False, n_hidden=0, dropout=0.2, noGCN = False, debugging = False):
+        super(RepresentationFunc, self).__init__()
 
-    def __init__(self, in_features, out_features, adj, filters=[128, 128, 128], bnorm=True, n_hidden=32, dropout=0.2, noGCN = False, debugging = False):
-        super(GCNGame, self).__init__()
-
-        # Graph convolution layers
         self.gconv = nn.Sequential(*([GraphConv(in_features=in_features if layer == 0 else filters[layer - 1],
                                                 out_features=f,
                                                 # activation=nn.ReLU(inplace=True),
-                                                activation=nn.Tanh(),
+                                                activation = nn.Tanh(),
                                                 bnorm=bnorm) for layer, f in enumerate(filters)]))
         if noGCN:
             self.laplacian = torch.eye(adj.shape[0])
         else:
             self.laplacian = self.laplacian_batch(adj)
-        self.t_laplacian = self.laplacian
+
+        self.fc = nn.Linear(filters[-1], out_features)
+        self.activation = nn.ReLU(inplace = True)
+
+    def laplacian_batch(self, A):
+        A = torch.FloatTensor(A)
+        N = A.shape[0]
+        A_hat = A
+        I = torch.eye(N)
+        I = 2 * I
+        A_hat = A + I
+        D_hat = (torch.sum(A_hat, 1) + 1e-5) ** (-0.5)
+        L = D_hat * A_hat * D_hat
+        return L
+
+    def forward(self, x, feat):
+
+        if len(x.shape)==3:
+            self.t_laplacian = [self.laplacian.unsqueeze(dim=0)]*x.shape[0]
+            self.t_laplacian = torch.cat(self.t_laplacian)
+        else:
+            self.t_laplacian = self.laplacian
+
+        x = torch.cat((x, feat), dim=-1)
+        # print("magix", x)
+
+        x = self.gconv([x, self.t_laplacian, 0])[0]
+        x = self.fc(x)
+        x = self.activation(x)
+        return x
+
+    def step(self, x, feat):
+        x = torch.FloatTensor(x)
+        feat = torch.FloatTensor(feat)
+        return self.forward(x, feat)
+
+
+class PredictionNN(nn.Module):
+    '''
+    Baseline Graph Convolutional Network with a stack of Graph Convolution Layers and global pooling over nodes.
+    '''
+
+    def __init__(self, in_features, out_features, n_hidden=64, dropout=0.2, debugging = False):
+        super(PredictionNN, self).__init__()
 
         self.debugging = debugging
 
@@ -98,9 +141,9 @@ class GCNGame(nn.Module):
             fcPolicy.append(nn.Dropout(p=dropout))
             fcQ.append(nn.Dropout(p=dropout))
         if n_hidden > 0:
-            fcPolicy.append(nn.Linear(filters[-1], n_hidden))
+            fcPolicy.append(nn.Linear(in_features, n_hidden))
             fcPolicy.append(nn.ReLU(inplace=True))
-            fcQ.append(nn.Linear(filters[-1], n_hidden))
+            fcQ.append(nn.Linear(in_features, n_hidden))
             fcQ.append(nn.ReLU(inplace=True))
             if dropout > 0:
                 fcPolicy.append(nn.Dropout(p=dropout))
@@ -124,19 +167,9 @@ class GCNGame(nn.Module):
         L = D_hat * A_hat * D_hat
         return L
 
-    def forward(self, x, feat):
+    def forward(self, x):
 
-        if len(x.shape)==3:
-            self.t_laplacian = [self.laplacian.unsqueeze(dim=0)]*x.shape[0]
-            self.t_laplacian = torch.cat(self.t_laplacian)
-        else:
-            self.t_laplacian = self.laplacian
-
-        x = torch.cat((x, feat), dim=-1)
-        x = self.gconv([x, self.t_laplacian])[0]
         # x = torch.mean(x, dim=-2)  # max pooling over nodes (usually performs better than average)
-        if self.debugging:
-            print("...", x)
         x = torch.max(x, dim=-2)[0]  # max pooling over nodes (usually performs better than average)
         if self.debugging:
             print(x)
@@ -146,42 +179,36 @@ class GCNGame(nn.Module):
         Q = self.fcQ(x)
         return Policy, F.softmax(Policy, dim=0), Q
 
-    def step(self, x, feat):
+    def step(self, x):
 
         x = torch.FloatTensor(x)
-        feat = torch.FloatTensor(feat)
 
-        _, pi, v = self.forward(x, feat)
+        _, pi, v = self.forward(x)
         return pi, v[0]
 
-class GCNScore(nn.Module):
+class ScorePredictionNN(nn.Module):
     '''
     Baseline Graph Convolutional Network with a stack of Graph Convolution Layers and global pooling over nodes.
     '''
 
-    def __init__(self, in_features, out_features, adj, filters=[64, 64], bnorm=False, n_hidden=0, dropout=0.2):
-        super(GCNScore, self).__init__()
+    def __init__(self, in_features, n_hidden=64, dropout=0.2, debugging = False):
+        super(ScorePredictionNN, self).__init__()
 
-        # Graph convolution layers
-        self.gconv = nn.Sequential(*([GraphConv(in_features=in_features if layer == 0 else filters[layer - 1],
-                                                out_features=f,
-                                                activation=nn.ReLU(inplace=True),
-                                                bnorm=bnorm) for layer, f in enumerate(filters)]))
-        self.laplacian = self.laplacian_batch(adj)
+        self.debugging = debugging
 
         # Fully connected layers
-        fc = []
+        fc =[]
         if dropout > 0:
             fc.append(nn.Dropout(p=dropout))
         if n_hidden > 0:
-            fc.append(nn.Linear(filters[-1], n_hidden))
+            fc.append(nn.Linear(in_features, n_hidden))
             fc.append(nn.ReLU(inplace=True))
             if dropout > 0:
                 fc.append(nn.Dropout(p=dropout))
             n_last = n_hidden
         else:
             n_last = filters[-1]
-        fc.append(nn.Linear(n_last, out_features))
+        fc.append(nn.Linear(n_last, 1))
         self.fc = nn.Sequential(*fc)
 
     def laplacian_batch(self, A):
@@ -195,45 +222,17 @@ class GCNScore(nn.Module):
         L = D_hat * A_hat * D_hat
         return L
 
-    def forward(self, x, feat):
-        x = torch.cat((x, feat), dim=-1)
-        x = self.gconv([x, self.laplacian])[0]
-        x = torch.mean(x, dim=-2)  # max pooling over nodes (usually performs better than average)
-        x = self.fc(x)
-        return x
+    def forward(self, x):
 
-    def step(self, x, feat):
-        x = torch.FloatTensor(x)
-        feat = torch.FloatTensor(feat)
-
-        score = self.forward(x, feat)
+        # x = torch.mean(x, dim=-2)  # max pooling over nodes (usually performs better than average)
+        x = torch.max(x, dim=-2)[0]  # max pooling over nodes (usually performs better than average)
+        if self.debugging:
+            print(x)
+        score = self.fc(x)
         return score
 
-class RepresentationFunc(nn.Module):
-    def __init__(self, in_features, out_features, adj, filters=[32,3], bnorm=False, n_hidden=0, dropout=0.2):
-        super(RepresentationFunc, self).__init__()
-
-        self.gconv = nn.Sequential(*([GraphConv(in_features=in_features if layer == 0 else filters[layer - 1],
-                                                out_features=f,
-                                                activation=nn.ReLU(inplace=True),
-                                                bnorm=bnorm) for layer, f in enumerate(filters)]))
-        self.laplacian = self.laplacian_batch(adj)
-
-    def laplacian_batch(self, A):
-        A = torch.FloatTensor(A)
-        N = A.shape[0]
-        A_hat = A
-        I = torch.eye(N)
-        I = 2 * I
-        A_hat = A + I
-        D_hat = (torch.sum(A_hat, 1) + 1e-5) ** (-0.5)
-        L = D_hat * A_hat * D_hat
-        return L
-
-    def forward(self, x):
-        x = self.gconv([x, self.laplacian])[0]
-        return x
-
     def step(self, x):
+
         x = torch.FloatTensor(x)
+
         return self.forward(x)
