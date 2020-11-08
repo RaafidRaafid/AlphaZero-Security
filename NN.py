@@ -41,16 +41,24 @@ class denseNet(Module):
                + str(self.out_features) + ')'
 
 class GCNConv(MessagePassing):
-    def __init__(self, in_channels, out_channels):
+    def __init__(self, in_channels, out_channels, activation):
         super(GCNConv, self).__init__(aggr='add')  # "Add" aggregation
         self.lin = torch.nn.Linear(in_channels, out_channels)
+        self.activation = activation
 
-    def forward(self, x, edge_index):
+    def forward(self, inp):
         # Step 1: Add self-loops
+        x = inp[0]
+        edge_index = inp[1]
+        idx = inp[2]
+
         edge_index, _ = add_self_loops(edge_index, num_nodes=x.size(0))
 
         # Step 2: Multiply with weights
+        # if idx==0:
+        #     print("age", x)
         x = self.lin(x)
+        x = self.activation(x)
 
         # Step 3: Calculate the normalization
         row, col = edge_index
@@ -59,7 +67,10 @@ class GCNConv(MessagePassing):
         norm = deg_inv_sqrt[row] * deg_inv_sqrt[col]
 
         # Step 4: Propagate the embeddings to the next layer
-        return self.propagate(edge_index, size=(x.size(0), x.size(0)), x=x, norm=norm)
+        x = self.propagate(edge_index, size=(x.size(0), x.size(0)), x=x, norm=norm)
+        # if idx==1:
+        #     print("pore", x[0])
+        return [x, edge_index, idx+1]
 
     def message(self, x_j, norm):
         # Normalize node features.
@@ -69,9 +80,10 @@ class RepresentationFunc(nn.Module):
     def __init__(self, nin, nhid, nout):
         super(RepresentationFunc, self).__init__()
 
-        self.gc = []
+        gc = []
         for layer, f in enumerate(nhid):
-            self.gc.append(GCNConv(in_channels = nin if layer == 0 else nhid[layer-1], out_channels = f))
+            gc.append(GCNConv(in_channels = nin if layer == 0 else nhid[layer-1], out_channels = f, activation = nn.ReLU(inplace = True)))
+        self.gcn = nn.Sequential(*gc)
 
         self.fc = nn.Linear(nhid[-1], nout)
         self.activation = nn.ReLU(inplace = True)
@@ -80,9 +92,7 @@ class RepresentationFunc(nn.Module):
         x = torch.cat((x, feat), dim=-1)
         x = torch.squeeze(x)
 
-        for i in range(len(self.gc)):
-            x = self.gc[i](x, edge_index)
-            x = self.activation(x)
+        x = self.gcn([x, edge_index, 0])[0]
 
         x = self.fc(x)
         return self.activation(x)
